@@ -1,0 +1,19 @@
+fn main():
+    values = [1, 2, 3]
+    for item in values:
+        values.append(item + 10)
+        if item == 2:
+            continue
+        print(item)
+    print(len(values))
+    for character in "é🍓":
+        print(character)
+    for i in range(3, -1, -2):
+        print(i)
+    for n in range(9223372036854775806, 9223372036854775807, 2):
+        print(n)
+    for n in range(-9223372036854775807, -9223372036854775808, -2):
+        print(n)
+    for ignored in range(0):
+        panic("unreachable")
+    print(-9223372036854775808)

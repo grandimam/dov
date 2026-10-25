@@ -1,0 +1,117 @@
+# UTF-8 string representation, indexing, and primitive operations.
+
+fn rt_size(text: int) -> int:
+    size = 0
+    while raw.byte(text + size) != 0:
+        size = size + 1
+    return size
+
+fn rt_copy_string(text: int, line: int) -> int:
+    size = rt_size(text)
+    result = rt_heap(size + 1, 0, line)
+    raw.copy(result, text, size + 1)
+    return result
+
+fn rt_utf8_width(pointer: int, line: int) -> int:
+    first = raw.byte(pointer)
+    width = 0
+    if first < 128:
+        width = 1
+    elif first >= 194 and first <= 223:
+        width = 2
+    elif first >= 224 and first <= 239:
+        width = 3
+    elif first >= 240 and first <= 244:
+        width = 4
+    if width == 0:
+        rt_panic(line, raw.address("invalid UTF-8 string"))
+    i = 1
+    while i < width:
+        byte = raw.byte(pointer + i)
+        if byte < 128 or byte > 191:
+            rt_panic(line, raw.address("invalid UTF-8 string"))
+        i = i + 1
+    second = 0
+    if width > 1:
+        second = raw.byte(pointer + 1)
+    if width == 3:
+        if (first == 224 and second < 160) or (first == 237 and second >= 160):
+            rt_panic(line, raw.address("invalid UTF-8 string"))
+    if width == 4:
+        if (first == 240 and second < 144) or (first == 244 and second >= 144):
+            rt_panic(line, raw.address("invalid UTF-8 string"))
+    return width
+
+fn rt_string_len(text: int, line: int) -> int:
+    pointer = text
+    length = 0
+    while raw.byte(pointer) != 0:
+        pointer = pointer + rt_utf8_width(pointer, line)
+        length = length + 1
+    return length
+
+fn rt_string_slice(text: int, start: int, end: int, line: int) -> int:
+    frame = rt_keep(text, 0, 0)
+    length = rt_string_len(text, line)
+    a = start
+    b = end
+    if a < 0:
+        a = a + length
+    if b < 0:
+        b = b + length
+    if a < 0 or b < a or b > length:
+        rt_panic(line, raw.address("slice bounds must satisfy 0 <= start <= end <= length"))
+    pointer = text
+    i = 0
+    while i < a:
+        pointer = pointer + rt_utf8_width(pointer, line)
+        i = i + 1
+    begin = pointer
+    while i < b:
+        pointer = pointer + rt_utf8_width(pointer, line)
+        i = i + 1
+    result = rt_heap(pointer - begin + 1, 0, line)
+    raw.copy(result, begin, pointer - begin)
+    rt_release(frame)
+    return result
+
+fn rt_string_get(text: int, index: int, line: int) -> int:
+    position = rt_index(index, rt_string_len(text, line), line)
+    return rt_string_slice(text, position, position + 1, line)
+
+fn rt_string_next(cursor: int, line: int) -> int:
+    text = raw.load(cursor)
+    width = rt_utf8_width(text, line)
+    result = rt_heap(width + 1, 0, line)
+    raw.copy(result, text, width)
+    raw.store(cursor, text + width)
+    return result
+
+fn rt_string_concat(a: int, b: int, line: int) -> int:
+    frame = rt_keep(a, b, 0)
+    x = rt_size(a)
+    y = rt_size(b)
+    result = rt_heap(x + y + 1, 0, line)
+    raw.copy(result, a, x)
+    raw.copy(result + x, b, y + 1)
+    rt_release(frame)
+    return result
+
+fn rt_int_string(value: int, line: int) -> int:
+    result = rt_heap(32, 0, line)
+    raw.call("rt_os_format_int", result, value)
+    return result
+
+fn rt_string_compare(a: int, b: int) -> int:
+    i = 0
+    while raw.byte(a + i) == raw.byte(b + i):
+        if raw.byte(a + i) == 0:
+            return 0
+        i = i + 1
+    return raw.byte(a + i) - raw.byte(b + i)
+
+fn rt_string_byte_len(text: int) -> int:
+    return rt_size(text)
+
+fn rt_string_byte_at(text: int, index: int, line: int) -> int:
+    return raw.byte(text + rt_index(index, rt_size(text), line))

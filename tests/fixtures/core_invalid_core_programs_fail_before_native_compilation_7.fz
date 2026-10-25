@@ -1,0 +1,4 @@
+enum A:
+    X(n: int)
+fn main():
+    print(A.X(1).n)

@@ -1,0 +1,11 @@
+# Function parameters and return values have types.
+fn square(value: int) -> int:
+    return value * value
+
+fn main():
+    # Local variable types are inferred.
+    answer = square(5)
+    if answer > 20:
+        print("A big square:", answer)
+    else:
+        print("A small square:", answer)

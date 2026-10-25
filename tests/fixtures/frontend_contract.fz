@@ -1,0 +1,74 @@
+import syntax
+import lexer
+import parser
+
+fn tree(source: str) -> syntax.Program:
+    return parser.parse(source, "input.fz")
+
+fn main():
+    args = sys.args()
+    root = args[0]
+    program = tree(fs.read_text(root + "/tests/fixtures/frontend_all_features.fz"))
+    assert len(program.imports) == 1
+    assert program.imports[0].text == "compiler.syntax"
+    nodes = program.declarations
+    assert len(nodes) == 5
+    assert nodes[0].kind == "struct"
+    assert nodes[0].names[0] == "children" and nodes[0].names[1] == "name"
+    assert nodes[0].types[0] == "list[syntax.Expr]" and nodes[0].types[1] == "str"
+    assert nodes[1].kind == "enum"
+    assert nodes[1].children[0].names[0] == "left"
+    assert nodes[1].children[0].names[1] == "right"
+    assert nodes[2].kind == "fn" and nodes[2].names[0] == "value"
+    assert nodes[2].type_name == "int"
+    for name in ["syntax", "lexer", "parser"]:
+        parsed = tree(fs.read_text(root + "/src/compiler/" + name + ".fz"))
+        found = False
+        for item in parsed.declarations:
+            if item.kind == "fn":
+                found = True
+        assert found
+    assert len(tree("").declarations) == 0
+    assert len(tree("# comment without trailing newline").declarations) == 0
+    assert tree("fn main():\r\n    pass").declarations[0].text == "main"
+    parsed = tree("fn main():\n    result = not 1 + 2 * 3 == 7 and False or True\n")
+    expression = parsed.declarations[0].children[0].children[0]
+    for op in ["or", "and", "not", "==", "+"]:
+        assert expression.text == op
+        if op == "+":
+            assert expression.children[1].text == "*"
+        else:
+            expression = expression.children[0]
+    parsed = tree("fn main():\n    make().children[0].name = \"leaf\"\n    make().children[0].children.append(Node())\n")
+    statements = parsed.declarations[0].children
+    assert statements[0].kind == "set_field" and statements[0].text == "name"
+    assert statements[1].children[0].text == "append"
+    tokens = lexer.lex("fn main():\r\n    print(\"🍓\", 00042) # comment\r\n", "input.fz")
+    indents = 0
+    dedents = 0
+    strings = 0
+    integers = 0
+    for token in tokens:
+        if token.kind == "str":
+            strings = strings + 1
+            assert token.text == "🍓" and token.line == 2 and token.column == 11
+        elif token.kind == "int":
+            integers = integers + 1
+            assert token.text == "42" and token.line == 2 and token.column == 16
+        elif token.kind == "indent":
+            indents = indents + 1
+        elif token.kind == "dedent":
+            dedents = dedents + 1
+    assert strings == 1 and integers == 1 and indents == 1 and dedents == 1
+    continued = "fn main():\n    values = [\n# ignored\n        (1 +\n         2),\n\n0,\n    ]\n    print(values)\n"
+    newlines = 0
+    found_zero = False
+    for token in lexer.lex(continued, "input.fz"):
+        if token.kind == "newline":
+            newlines = newlines + 1
+        elif token.kind == "int" and token.text == "0":
+            found_zero = token.line == 7 and token.column == 1
+    assert newlines == 3 and found_zero
+    assert len(tree(continued).declarations[0].children) == 2
+    assert len(tree("fn main():\n    if (\nTrue\n):\n        pass\n    pass\n").declarations[0].children) == 2
+    print("frontend contracts passed")

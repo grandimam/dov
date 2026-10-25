@@ -1,0 +1,9 @@
+fn main():
+    plans = ["learn Faz", "make something silly"]
+    plans.append("take a break")
+
+    for plan in plans:
+        print("-", plan)
+
+    print("Plans:", len(plans))
+    print("First:", plans[0])

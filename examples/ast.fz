@@ -1,0 +1,26 @@
+struct Span:
+    line: int
+    column: int
+
+enum Expr:
+    Number(value: int)
+    Add(left: Expr, right: Expr)
+
+struct Node:
+    expression: Expr
+    span: Span
+
+fn evaluate(expression: Expr) -> int:
+    match expression:
+        case Expr.Number(value):
+            return value
+        case Expr.Add(left, right):
+            return evaluate(left) + evaluate(right)
+
+fn main():
+    node = Node(Expr.Add(Expr.Number(20), Expr.Number(22)), Span(1, 1))
+    node.span.column = 3
+    assert evaluate(node.expression) == 42, "bad evaluator"
+    print("answer:", evaluate(node.expression), "column:", node.span.column)
+    for i in range(3):
+        print(i)

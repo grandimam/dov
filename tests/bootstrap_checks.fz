@@ -1,0 +1,149 @@
+import support
+
+struct ExpressionCase:
+    source: str
+    expected: str
+
+fn clang() -> str:
+    compiler = sys.env("FAZ_CLANG")
+    if compiler == "":
+        compiler = sys.env("CC")
+    if compiler == "":
+        compiler = "clang"
+    return compiler
+
+fn no_tools(executable: str, args: list[str]) -> support.Result:
+    path = sys.env("PATH")
+    sys.set_env("PATH", "")
+    result = support.capture(executable, args)
+    sys.set_env("PATH", path)
+    return result
+
+fn emit_expression(executable: str, directory: str, source: str) -> support.Result:
+    fs.write_text(directory + "/input.expr", source)
+    return no_tools(executable, [directory + "/input.expr", directory + "/output.ll"])
+
+fn native(s: support.Suite, module: str, binary: str):
+    result = support.capture(clang(), ["-x", "ir", "-O2", "-Werror", "-Wno-override-module", module, "-o", binary])
+    support.check(s, result.status == 0, "expression LLVM compilation", result.out + result.err)
+
+fn expressions(s: support.Suite):
+    directory = support.fresh()
+    sources = support.fresh()
+    for name in ["main", "syntax", "scanner", "parser", "emitter"]:
+        fs.write_text(sources + "/" + name + ".fz", fs.read_text(s.root + "/examples/exprc/" + name + ".fz"))
+    executable = directory + "/exprc"
+    support.build(s, sources + "/main.fz", executable)
+    good = [
+        ExpressionCase("2 + 3 * 4", "14"),
+        ExpressionCase("(2 + 3) * 4", "20"),
+        ExpressionCase("20 - 5 - 3", "12"),
+        ExpressionCase("20 - (5 - 3)", "18"),
+        ExpressionCase("2 * 3 * 4 + 5", "29"),
+        ExpressionCase("-2 * -3 + --4", "10"),
+        ExpressionCase("-(-(2 + 3)) * -2", "-10"),
+        ExpressionCase(" \t# Unicode comment 🍓\r\n00042 # trailing comment", "42"),
+        ExpressionCase("9223372036854775807", "9223372036854775807"),
+        ExpressionCase("-9223372036854775807 - 1", "-9223372036854775808"),
+        ExpressionCase("(-4611686018427387904) * 2", "-9223372036854775808"),
+        ExpressionCase("(-9223372036854775807 - 1) + 9223372036854775807", "-1"),
+        ExpressionCase("3037000499 * 3037000499", "9223372030926249001"),
+    ]
+    for item in good:
+        result = emit_expression(executable, directory, item.source)
+        support.check(s, result.status == 0, "expression emits " + item.source, result.err)
+        native(s, directory + "/output.ll", directory + "/expression")
+        support.success(s, no_tools(directory + "/expression", []), item.expected + "\n", "expression precedence and signed boundaries")
+    for source in ["9223372036854775807 + 1", "(-9223372036854775807 - 1) - 1", "3037000500 * 3037000500", "(-9223372036854775807 - 1) * -1", "-(-9223372036854775807 - 1)", "9223372036854775807 + 1 - 1"]:
+        result = emit_expression(executable, directory, source)
+        support.check(s, result.status == 0, "overflow expression emits", result.err)
+        native(s, directory + "/output.ll", directory + "/expression")
+        result = no_tools(directory + "/expression", [])
+        support.check(s, result.status == 2 and result.out == "", "expression overflow", result.out + result.err)
+    bad = [
+        ExpressionCase("", "expected a number or '(' at offset 0"),
+        ExpressionCase("# comment", "expected a number or '(' at offset 9"),
+        ExpressionCase("1 +", "expected a number or '(' at offset 3"),
+        ExpressionCase("()", "expected a number or '(' at offset 1"),
+        ExpressionCase("(1 + 2", "expected ')' at offset 6"),
+        ExpressionCase("1 2", "unexpected token at offset 2"),
+        ExpressionCase("(1 + 2))", "unexpected token at offset 7"),
+        ExpressionCase("+1", "expected a number or '(' at offset 0"),
+        ExpressionCase("1 / 2", "unexpected character at offset 2: /"),
+        ExpressionCase("1.2", "unexpected character at offset 1: ."),
+        ExpressionCase("1 + 🍓", "unexpected character at offset 4: 🍓"),
+        ExpressionCase("9223372036854775808", "integer overflow"),
+        ExpressionCase("-9223372036854775808", "integer overflow"),
+        ExpressionCase("999999999999999999999999999999999", "integer overflow"),
+    ]
+    for item in bad:
+        fs.write_text(directory + "/output.ll", "preserve me")
+        result = emit_expression(executable, directory, item.source)
+        support.check(s, result.status == 1 and support.contains(result.err, item.expected), "expression malformed offsets", result.out + result.err)
+        support.check(s, fs.read_text(directory + "/output.ll") == "preserve me", "expression preserves failed output", item.source)
+    argument_sets: list[list[str]] = [[], ["input.expr"], ["a", "b", "c"]]
+    for args in argument_sets:
+        result = no_tools(executable, args)
+        support.check(s, result.status == 1 and support.contains(result.err, "usage: exprc <input.expr> <output.ll>"), "expression argument contract", result.out + result.err)
+    result = support.capture(executable, [directory + "/absent.expr", directory + "/output.ll"])
+    support.check(s, result.status == 1 and support.contains(result.err, "cannot read"), "expression missing file", result.err)
+    for content in [[255], [49, 0]]:
+        fs.write_bytes(directory + "/input.expr", content)
+        result = support.capture(executable, [directory + "/input.expr", directory + "/absent-output.ll"])
+        support.check(s, result.status == 1 and not fs.exists(directory + "/absent-output.ll"), "expression malformed file bytes", result.err)
+    fs.remove_temp(sources)
+    result = emit_expression(executable, directory, "6 * 7")
+    support.check(s, result.status == 0, "expression compiler needs no sources or tools", result.err)
+    destination = support.fresh()
+    native(s, directory + "/output.ll", destination + "/expression")
+    fs.remove_temp(directory)
+    support.success(s, no_tools(destination + "/expression", []), "42\n", "expression executable is standalone")
+    fs.remove_temp(destination)
+
+fn find(text: str, part: str) -> int:
+    for i in range(len(text) - len(part) + 1):
+        if text[i:i + len(part)] == part:
+            return i
+    return -1
+
+fn educational_lexer(s: support.Suite):
+    directory = support.fresh()
+    original = fs.read_text(s.root + "/examples/lexer.fz")
+    code = original[:find(original, "fn main():")] + "fn main():\n    args = sys.args()\n    tokens = lex(fs.read_text(args[0]))\n    if args[1] == \"summary\":\n        print(tokens[0], tokens[-1], len(tokens) > 500)\n    else:\n        for token in tokens:\n            print(token)\n"
+    binary = support.source(s, directory, code)
+    fs.write_text(directory + "/input.fz", "fn main():\n    print(42)\n")
+    support.success(s, support.capture(binary, [directory + "/input.fz", "all"]), "NAME:fn\nNAME:main\nSYMBOL:(\nSYMBOL:)\nSYMBOL::\nNEWLINE\nINDENT\nNAME:print\nSYMBOL:(\nINT:42\nSYMBOL:)\nNEWLINE\nDEDENT\nEOF\n", "educational lexer tokens")
+    support.success(s, support.capture(binary, [s.root + "/examples/lexer.fz", "summary"]), "NAME:fn EOF True\n", "educational lexer scans itself")
+    result = support.capture(binary, [s.root + "/tests/fixtures/" + "compiler_faz_written_lexer_reports_invalid_input_0.fz", "all"])
+    support.check(s, result.status == 1 and support.contains(result.err, "unterminated string"), "educational lexer malformed input", result.err)
+    result = support.capture(binary, [s.root + "/tests/fixtures/" + "compiler_faz_written_lexer_reports_invalid_input_1.fz", "all"])
+    support.check(s, result.status == 1 and support.contains(result.err, "inconsistent indentation"), "educational lexer malformed input", result.err)
+    result = support.capture(binary, [s.root + "/tests/fixtures/" + "compiler_faz_written_lexer_reports_invalid_input_2.fz", "all"])
+    support.check(s, result.status == 1 and support.contains(result.err, "tabs are not allowed"), "educational lexer malformed input", result.err)
+    fs.remove_temp(directory)
+
+fn frontend(s: support.Suite):
+    directory = support.fresh()
+    for name in ["syntax", "lexer", "parser"]:
+        fs.write_text(directory + "/" + name + ".fz", fs.read_text(s.root + "/src/compiler/" + name + ".fz"))
+    contract = fs.read_text(s.root + "/tests/fixtures/frontend_contract.fz")
+    executable = support.source(s, directory, contract)
+    support.success(s, no_tools(executable, [s.root]), "frontend contracts passed\n", "frontend AST, precedence, tokens, Unicode, locations and continuations")
+    executable = support.source(s, directory, fs.read_text(s.root + "/tests/fixtures/frontend_harness.fz"))
+    bad = [
+        ExpressionCase("fn main():\n    print([1)\n", ":2:13:"),
+        ExpressionCase("fn main():\n    print(\n        [1, 2]\n", ":2:10:"),
+        ExpressionCase("fn main():\n    ]\n", ":2:5:"),
+        ExpressionCase("fn main():\n\tpass\n", ":2:1:"),
+    ]
+    for item in bad:
+        fs.write_text(directory + "/input.fz", item.source)
+        result = no_tools(executable, ["parse", directory + "/input.fz"])
+        support.check(s, result.status != 0 and support.contains(result.err, "input.fz" + item.expected), "frontend error source location", result.err)
+    fs.remove_temp(directory)
+
+fn run(s: support.Suite):
+    print("Bootstrap and frontend contracts")
+    expressions(s)
+    educational_lexer(s)
+    frontend(s)

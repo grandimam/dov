@@ -1,0 +1,12 @@
+import scanner
+import parser
+import emitter
+
+fn main():
+    args = sys.args()
+    assert len(args) == 2, "usage: exprc <input.expr> <output.ll>"
+    source = fs.read_text(args[0])
+    tokens = scanner.scan(source)
+    tree = parser.parse(tokens)
+    fs.write_text(args[1], emitter.program(tree))
+    print("Wrote", args[1])

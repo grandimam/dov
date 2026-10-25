@@ -1,0 +1,10 @@
+struct Project:
+    name: str
+    finished: bool
+
+fn main():
+    project = Project("tiny game", False)
+    print(project.name, project.finished)
+
+    project.finished = True
+    print(project.name, project.finished)

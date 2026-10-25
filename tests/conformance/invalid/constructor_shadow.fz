@@ -1,0 +1,5 @@
+enum Choice:
+    A
+fn main():
+    value = Choice.A()
+    Choice = 2

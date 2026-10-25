@@ -1,0 +1,17 @@
+struct Node:
+    label: str
+    children: list[Node]
+
+fn make() -> Node:
+    return Node("root", [])
+
+fn main():
+    root = make()
+    alias = root
+    alias.label = "changed"
+    root.children.append(Node("child", []))
+    root.children[0].label = "leaf"
+    root.children[0].children.append(Node("grandchild", []))
+    print(root.label, root.children[0].label, root.children[0].children.pop().label)
+    make().children.append(root)
+    assert len(root.children) == 1

@@ -1,0 +1,10 @@
+fn worker():
+    print("child")
+
+fn main():
+    with task.group() as group:
+        group.spawn(worker)
+        while True:
+            break
+        print("parent")
+    print("joined")

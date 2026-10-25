@@ -1,0 +1,6 @@
+enum A:
+    X
+fn main():
+    match A.X():
+        case A.Y():
+            pass

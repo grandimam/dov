@@ -1,0 +1,5 @@
+/build/
+/faz
+*.dSYM/
+*.vsix
+node_modules/

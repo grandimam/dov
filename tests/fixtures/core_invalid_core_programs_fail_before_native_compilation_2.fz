@@ -1,0 +1,5 @@
+enum A:
+    X
+    X
+fn main():
+    pass

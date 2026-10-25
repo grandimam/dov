@@ -1,0 +1,4 @@
+struct A:
+    x: Missing
+fn main():
+    pass

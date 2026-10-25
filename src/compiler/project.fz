@@ -1,0 +1,111 @@
+# Repository development and installation, implemented in Faz itself.
+import toolchain
+
+fn root(path: str) -> str:
+    directory = fs.canonical(path)
+    if not fs.exists(directory + "/src/compiler/main.fz") or not fs.exists(directory + "/src/runtime/memory.fz"):
+        toolchain.error("expected a Faz source checkout: " + path)
+    return directory
+
+fn test(compiler: str, directory: str):
+    temporary = fs.temp_dir()
+    runner = temporary + "/faz-tests"
+    configured = sys.env("FAZ_CLANG")
+    llvm = toolchain.compiler()
+    if str.contains(llvm, "/"):
+        llvm = fs.canonical(llvm)
+    sys.set_env("FAZ_CLANG", llvm)
+    toolchain.invoke(compiler, ["build", directory + "/tests/main.fz", "-o", runner])
+    status = sys.run(runner, [compiler, directory])
+    sys.set_env("FAZ_CLANG", configured)
+    fs.remove_temp(temporary)
+    if status != 0:
+        toolchain.error("Faz conformance tests failed (status " + str(status) + ")")
+
+fn stage(compiler: str, source: str, output: str):
+    toolchain.invoke(compiler, ["emit-llvm", source, "-o", output + ".ll"])
+    toolchain.native(output + ".ll", output)
+
+fn bootstrap(directory: str, verify: bool, refresh: bool):
+    source = directory + "/src/compiler/main.fz"
+    output = directory + "/build/bootstrap"
+    fs.make_parent(output + "/verification.txt")
+    fs.write_text(output + "/verification.txt", "status=in_progress\n")
+    seed = directory + "/bootstrap/seed-" + sys.platform() + ".ll"
+    producer = sys.executable()
+    if not refresh:
+        toolchain.native(seed, output + "/faz-seed")
+        producer = output + "/faz-seed"
+    stage(producer, source, output + "/faz-bootstrap-a")
+    embedding = output + "/runtime_source.fz"
+    toolchain.invoke(output + "/faz-bootstrap-a", ["embed-runtime", directory + "/src", "-o", embedding])
+    if refresh:
+        fs.write_text(directory + "/src/compiler/runtime_source.fz", fs.read_text(embedding))
+    elif fs.read_text(embedding) != fs.read_text(directory + "/src/compiler/runtime_source.fz"):
+        toolchain.error("embedded runtime is stale; run faz refresh-seed")
+    stage(output + "/faz-bootstrap-a", source, output + "/faz-bootstrap-b")
+    stage(output + "/faz-bootstrap-b", source, output + "/faz-stage1")
+    stage(output + "/faz-stage1", source, output + "/faz-stage2")
+    toolchain.invoke(output + "/faz-stage2", ["emit-llvm", source, "-o", output + "/stage3.ll"])
+    emitted = fs.read_text(output + "/faz-stage2.ll")
+    if emitted != fs.read_text(output + "/stage3.ll"):
+        toolchain.error("bootstrap mismatch: compiler generations emitted different LLVM IR")
+    print("Bootstrap fixed point: identical LLVM IR.")
+    if verify or refresh:
+        test(output + "/faz-stage1", directory)
+        test(output + "/faz-stage2", directory)
+        for platform in ["darwin", "linux"]:
+            generated = output + "/seed-" + platform + ".ll"
+            toolchain.invoke(output + "/faz-stage2", ["emit-llvm", source, "--platform", platform, "-o", generated])
+            destination = directory + "/bootstrap/seed-" + platform + ".ll"
+            if refresh:
+                fs.write_text(destination, fs.read_text(generated))
+            elif fs.read_text(destination) != fs.read_text(generated):
+                toolchain.error("the " + platform + " seed is stale; run faz refresh-seed")
+        if refresh:
+            toolchain.native(seed, output + "/faz-seed")
+            toolchain.invoke(output + "/faz-seed", ["emit-llvm", source, "-o", output + "/seed-check.ll"])
+            if emitted != fs.read_text(output + "/seed-check.ll"):
+                toolchain.error("refreshed seed did not reproduce the verified compiler")
+    fs.copy_executable(output + "/faz-stage2", directory + "/build/faz")
+    report = "status=verified\nbackend=LLVM\nfixed_point=true\n"
+    if verify or refresh:
+        report = report + "conformance=passed for both generations\n"
+    else:
+        report = report + "conformance=not run\n"
+    fs.write_text(output + "/verification.txt", report)
+    print("Native compiler: " + directory + "/build/faz")
+
+fn install(prefix: str):
+    if prefix == "":
+        toolchain.error("installation prefix must not be empty")
+    destination = prefix + "/bin/faz"
+    fs.make_parent(destination)
+    source = sys.executable()
+    if not fs.same_file(source, destination):
+        fs.copy_executable(source, destination)
+    print("Installed " + destination)
+
+fn dispatch(args: list[str]) -> bool:
+    command = args[0]
+    if command == "install":
+        if len(args) > 2:
+            toolchain.error("usage: faz install [prefix]")
+        prefix = sys.env("HOME") + "/.local"
+        if len(args) == 2:
+            prefix = args[1]
+        install(prefix)
+        return True
+    if command != "build-self" and command != "verify" and command != "test" and command != "refresh-seed":
+        return False
+    if len(args) > 2:
+        toolchain.error("usage: faz " + command + " [checkout-directory]")
+    directory = "."
+    if len(args) == 2:
+        directory = args[1]
+    directory = root(directory)
+    if command == "test":
+        test(sys.executable(), directory)
+    else:
+        bootstrap(directory, command == "verify", command == "refresh-seed")
+    return True

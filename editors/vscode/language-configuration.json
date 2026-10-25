@@ -1,0 +1,82 @@
+{
+  "comments": {
+    "lineComment": "#"
+  },
+  "brackets": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "[",
+      "]"
+    ]
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    },
+    {
+      "open": "[",
+      "close": "]",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    },
+    {
+      "open": "\"",
+      "close": "\"",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    },
+    {
+      "open": "'",
+      "close": "'",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    }
+  ],
+  "surroundingPairs": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "\"",
+      "\""
+    ],
+    [
+      "'",
+      "'"
+    ]
+  ],
+  "indentationRules": {
+    "increaseIndentPattern": "^\\s*(?:fn\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\(.*\\)(?:\\s*->\\s*[A-Za-z_][A-Za-z0-9_.\\[\\] ]*)?|(?:if|elif|while|for|match|case)\\b.+|(?:struct|enum)\\s+[A-Za-z_][A-Za-z0-9_]*|with\\s+task\\.group\\(\\)\\s+as\\s+[A-Za-z_][A-Za-z0-9_]*|\\)(?:\\s*->\\s*[A-Za-z_][A-Za-z0-9_.\\[\\] ]*)?|else)\\s*:\\s*(?:#.*)?$"
+  },
+  "onEnterRules": [
+    {
+      "beforeText": "^\\s*(?:return(?:\\s+.*)?|break|continue|pass)\\s*(?:#.*)?$",
+      "action": {
+        "indent": "outdent"
+      }
+    }
+  ],
+  "folding": {
+    "offSide": true
+  },
+  "wordPattern": "[A-Za-z_][A-Za-z0-9_]*"
+}

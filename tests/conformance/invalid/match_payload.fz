@@ -1,0 +1,6 @@
+enum Choice:
+    A(value: int)
+fn main():
+    match Choice.A(1):
+        case Choice.A():
+            pass

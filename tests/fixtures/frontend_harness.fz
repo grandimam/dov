@@ -1,0 +1,37 @@
+import syntax
+import lexer
+import parser
+fn scalar(value: str):
+    print(str(len(value)) + ":" + value)
+fn dump(node: syntax.Node):
+    scalar(node.kind)
+    scalar(node.text)
+    scalar(node.type_name)
+    print(len(node.names))
+    for name in node.names:
+        scalar(name)
+    print(len(node.types))
+    for item in node.types:
+        scalar(item)
+    print(len(node.children))
+    for child in node.children:
+        dump(child)
+fn main():
+    args = sys.args()
+    source = fs.read_text(args[1])
+    if args[0] == "lex":
+        for token in lexer.lex(source, args[1]):
+            scalar(token.kind)
+            scalar(token.text)
+            print(token.line)
+            print(token.column)
+    else:
+        program = parser.parse(source, args[1])
+        for item in program.imports:
+            dump(item)
+        for item in program.declarations:
+            if item.kind != "fn":
+                dump(item)
+        for item in program.declarations:
+            if item.kind == "fn":
+                dump(item)

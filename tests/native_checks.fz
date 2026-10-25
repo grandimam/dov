@@ -1,0 +1,83 @@
+import support
+
+fn run(s: support.Suite):
+    directory = support.fresh()
+    main = directory + "/main.fz"
+    binary = directory + "/repeated output"
+    old = directory + "/old output"
+    fs.write_text(main, "fn main():\n    print(\"first\")\n")
+    support.build(s, main, binary)
+    support.success(s, support.capture(binary, []), "first\n", "first executable")
+    fs.hardlink(binary, old)
+    fs.write_text(main, "fn main():\n    print(\"second\")\n")
+    support.build(s, main, binary)
+    support.check(s, not fs.same_file(binary, old), "rebuild replaces inode", binary)
+    support.success(s, support.capture(binary, []), "second\n", "rebuilt executable")
+    support.success(s, support.capture(old, []), "first\n", "rebuild preserves running inode")
+
+    child = directory + "/child tool"
+    fs.write_text(main, "fn main():\n    args = sys.args()\n    if args[0] == \"127\":\n        sys.exit(127)\n    sys.exit(126)\n")
+    support.build(s, main, child)
+    denied = directory + "/not executable"
+    fs.write_text(denied, "not an executable\n")
+    wrapper = support.source(s, directory, "fn main():\n    args = sys.args()\n    print(sys.run(args[0], [\"127\"]))\n    print(sys.run(args[0], [\"126\"]))\n    print(sys.run(args[1], []))\n    print(sys.run(args[2], []))\n")
+    support.success(s, support.capture(wrapper, [child, directory + "/missing", denied]), "127\n126\n-1\n-2\n", "process launch and child exit remain distinct")
+    sleeper = directory + "/signal child"
+    fs.write_text(main, "fn main():\n    task.sleep(60000)\n")
+    support.build(s, main, sleeper)
+    pid = sys.start(sleeper, [])
+    support.check(s, pid > 0, "start child", str(pid))
+    if pid > 0:
+        sys.kill(pid)
+        status = sys.wait(pid)
+        support.check(s, status == 137, "signal status", str(status))
+    timed = sys.capture(sleeper, [], 20)
+    support.check(s, timed[0] == "124", "captured child timeout", timed[0])
+
+    wrapper = support.source(s, directory, "fn main():\n    for i in range(3000):\n        print(\"captured stdout café\")\n        sys.error(\"captured stderr café\")\n    sys.exit(23)\n")
+    result = support.capture(wrapper, [])
+    pieces: list[str] = []
+    errors: list[str] = []
+    for i in range(3000):
+        pieces.append("captured stdout café\n")
+        errors.append("captured stderr café\n")
+    support.check(s, result.status == 23 and result.out == str.join(pieces, "") and result.err == str.join(errors, ""), "capture preserves both large Unicode streams and exit status", str(result.status) + " stdout=" + str(len(result.out)) + " stderr=" + str(len(result.err)))
+
+    payload = directory + "/payload"
+    alias = directory + "/alias"
+    fs.write_text(payload, "original bytes\n")
+    fs.hardlink(payload, alias)
+    wrapper = support.source(s, directory, "fn main():\n    args = sys.args()\n    fs.copy_executable(args[0], args[1])\n")
+    for destination in [payload, alias]:
+        result = support.capture(wrapper, [payload, destination])
+        support.check(s, result.status != 0 and support.contains(result.err, "cannot copy a file onto itself"), "reject copy alias", result.err)
+        support.check(s, fs.read_text(payload) == "original bytes\n" and fs.read_text(alias) == "original bytes\n", "copy preserves alias bytes", payload)
+    source_directory = directory + "/source-directory"
+    fs.make_parent(source_directory + "/unused")
+    destination = directory + "/destination"
+    fs.write_text(destination, "keep the existing output")
+    result = support.capture(wrapper, [source_directory, destination])
+    support.check(s, result.status != 0 and fs.read_text(destination) == "keep the existing output", "failed copy preserves output", result.err)
+    for name in fs.entries(directory):
+        support.check(s, not support.starts(name, "destination.fz-"), "failed copy cleans staging", name)
+    protected = directory + "/protected"
+    fs.make_parent(protected + "/sentinel")
+    fs.write_text(protected + "/sentinel", "keep me")
+    wrapper = support.source(s, directory, "fn main():\n    args = sys.args()\n    fs.remove_temp(args[0])\n")
+    result = support.capture(wrapper, [protected])
+    support.check(s, result.status != 0 and support.contains(result.err, "created by fs.temp_dir") and fs.read_text(protected + "/sentinel") == "keep me", "temporary registry protects unrelated directory", result.err)
+
+    temporary_base = directory + "/temporary files"
+    fs.make_parent(temporary_base + "/unused")
+    native_code = "fn main():\n    greeting = sys.env(\"FAZ_NATIVE_GREETING\")\n    assert greeting == \"hello from environment\"\n    temporary = fs.temp_dir()\n    output = temporary + \"/nested/value.txt\"\n    fs.make_parent(output)\n    fs.write_text(output, greeting)\n    copy = temporary + \"/copied\"\n    fs.copy_executable(output, copy)\n    assert fs.read_text(copy) == greeting\n    assert fs.same_file(output, output)\n    assert not fs.same_file(output, copy)\n    fs.remove_temp(temporary)\n    assert not fs.exists(temporary)\n    temporary = fs.temp_dir()\n    fs.write_text(temporary + \"/cleanup-me\", sys.env(\"FAZ_NATIVE_GREETING\"))\n    temporary = \"discard the only Faz reference\"\n    for i in range(20):\n        garbage = \"allocation \" + str(i)\n    panic(\"intentional cleanup test\")\n"
+    wrapper = support.source(s, directory, native_code)
+    previous = sys.env("TMPDIR")
+    sys.set_env("TMPDIR", temporary_base)
+    sys.set_env("FAZ_GC_STRESS", "1")
+    sys.set_env("FAZ_NATIVE_GREETING", "hello from environment")
+    result = support.capture(wrapper, [])
+    sys.set_env("TMPDIR", previous)
+    sys.set_env("FAZ_GC_STRESS", "0")
+    support.check(s, result.status != 0 and support.contains(result.err, "intentional cleanup test"), "native GC panic", result.err)
+    support.check(s, len(fs.entries(temporary_base)) == 0, "native registry cleanup after panic", temporary_base)
+    fs.remove_temp(directory)

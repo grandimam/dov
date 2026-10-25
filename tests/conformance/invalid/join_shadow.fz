@@ -1,0 +1,3 @@
+fn main():
+    str = 1
+    print(str.join(["a"], ","))

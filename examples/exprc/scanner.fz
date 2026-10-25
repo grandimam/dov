@@ -1,0 +1,45 @@
+import syntax
+
+fn digit(c: str) -> int:
+    digits = "0123456789"
+    for i in range(10):
+        if c == digits[i]:
+            return i
+    return -1
+
+fn scan(source: str) -> list[syntax.Token]:
+    tokens: list[syntax.Token] = []
+    i = 0
+    while i < len(source):
+        c = source[i]
+        if c == " " or c == "\n" or c == "\r" or c == "\t":
+            i = i + 1
+            continue
+        if c == "#":
+            while i < len(source) and source[i] != "\n":
+                i = i + 1
+            continue
+        start = i
+        if digit(c) >= 0:
+            value = 0
+            while i < len(source) and digit(source[i]) >= 0:
+                value = value * 10 + digit(source[i])
+                i = i + 1
+            tokens.append(syntax.Token(syntax.TokenKind.Number(value), start))
+            continue
+        if c == "+":
+            kind = syntax.TokenKind.Plus()
+        elif c == "-":
+            kind = syntax.TokenKind.Minus()
+        elif c == "*":
+            kind = syntax.TokenKind.Star()
+        elif c == "(":
+            kind = syntax.TokenKind.Left()
+        elif c == ")":
+            kind = syntax.TokenKind.Right()
+        else:
+            panic("unexpected character at offset " + str(i) + ": " + c)
+        tokens.append(syntax.Token(kind, start))
+        i = i + 1
+    tokens.append(syntax.Token(syntax.TokenKind.End(), i))
+    return tokens

@@ -1,0 +1,16 @@
+# An enum represents a value that can take different shapes.
+enum Reply:
+    Found(message: str)
+    Missing
+
+fn show(reply: Reply):
+    # Every variant must be handled.
+    match reply:
+        case Reply.Found(message):
+            print(message)
+        case Reply.Missing():
+            print("Nothing here yet")
+
+fn main():
+    show(Reply.Found("Found a tiny treasure"))
+    show(Reply.Missing())

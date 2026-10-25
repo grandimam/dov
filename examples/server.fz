@@ -1,0 +1,14 @@
+# Built-in HTTP; no package or framework to install.
+# Run: faz run examples/server.fz
+# Try: curl http://127.0.0.1:8080/hello
+fn handle(target: str) -> str:
+    if target == "/hello":
+        return "Hello from Faz!\n"
+    if target == "/slow":
+        task.sleep(1000)
+        return "Other requests can run while this task waits.\n"
+    return "Try /hello or /slow\n"
+
+fn main():
+    print("Listening on http://127.0.0.1:8080")
+    http.serve("127.0.0.1", 8080, handle)

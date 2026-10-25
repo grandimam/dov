@@ -1,0 +1,96 @@
+import support
+import cases
+import bootstrap_checks
+
+fn emit(s: support.Suite, directory: str, source: str) -> str:
+    path = directory + "/input.fz"
+    module = directory + "/program.ll"
+    fs.write_text(path, source)
+    stress = sys.env("FAZ_GC_STRESS")
+    stats = sys.env("FAZ_GC_STATS")
+    sys.set_env("FAZ_GC_STRESS", "0")
+    sys.set_env("FAZ_GC_STATS", "0")
+    result = bootstrap_checks.no_tools(s.compiler, ["emit-llvm", path, "-o", module])
+    sys.set_env("FAZ_GC_STRESS", stress)
+    sys.set_env("FAZ_GC_STATS", stats)
+    support.check(s, result.status == 0, "emit LLVM without external tools", result.out + result.err)
+    if result.status == 0:
+        support.check(s, support.contains(fs.read_text(module), "define i32 @main("), "LLVM native entry point", module)
+    return module
+
+fn native(s: support.Suite, module: str, binary: str, optimization: str):
+    result = support.capture(bootstrap_checks.clang(), ["-x", "ir", optimization, "-Wno-override-module", module, "-o", binary])
+    support.check(s, result.status == 0, "native LLVM " + optimization, result.out + result.err)
+
+fn optimized(s: support.Suite):
+    directory = support.fresh()
+    module = emit(s, directory, "fn main():\n    text = \"é🙂漢\\\"\\\\\\n\"\n    print(len(text), str.byte_len(text))\n    print(str.byte_at(text, 0), str.byte_at(text, 1))\n    print(str.byte_at(text, 2), str.byte_at(text, 5))\n    print(text[0], text[1], text[2])\n    print(str.join([text[:2], text[2:3]], \"|\"))\n")
+    stress = sys.env("FAZ_GC_STRESS")
+    for optimization in ["-O0", "-O2", "-O3"]:
+        native(s, module, directory + "/program", optimization)
+        sys.set_env("FAZ_GC_STRESS", "1")
+        result = bootstrap_checks.no_tools(directory + "/program", [])
+        sys.set_env("FAZ_GC_STRESS", stress)
+        support.success(s, result, "6 12\n195 169\n240 130\né 🙂 漢\né🙂|漢\n", "UTF8 bytes and scalar indexing " + optimization)
+    module = emit(s, directory, "fn identity(value: int) -> int:\n    return value\nfn main():\n    minimum = identity(-9223372036854775808)\n    maximum = identity(9223372036854775807)\n    print(minimum, maximum, minimum % -1)\n    print(-7 // 3, -7 % 3, 7 // -3, 7 % -3, -7 // -3, -7 % -3)\n    print(minimum // 1, minimum + maximum)\n")
+    native(s, module, directory + "/program", "-O3")
+    support.success(s, support.capture(directory + "/program", []), "-9223372036854775808 9223372036854775807 0\n-3 2 -3 -2 2 -1\n-9223372036854775808 -1\n", "i64 extrema and floor division")
+    for expression in ["9223372036854775807 + 1 - 1", "-9223372036854775808 - 1 + 1", "3037000500 * 3037000500", "-(-9223372036854775808)", "-9223372036854775808 // -1", "1 // 0", "1 % 0"]:
+        module = emit(s, directory, "fn main():\n    print(" + expression + ")\n")
+        native(s, module, directory + "/program", "-O3")
+        result = support.capture(directory + "/program", [])
+        message = "integer overflow"
+        if expression == "1 // 0" or expression == "1 % 0":
+            message = "division by zero"
+        support.check(s, result.status == 1 and result.out == "" and support.contains(result.err, message) and support.contains(result.err, "line 2"), "optimizer preserves trap " + expression, result.out + result.err)
+    fs.remove_temp(directory)
+
+fn roots(s: support.Suite):
+    directory = support.fresh()
+    stress = sys.env("FAZ_GC_STRESS")
+    stats = sys.env("FAZ_GC_STATS")
+    for item in cases.all():
+        if item.kind == "gc":
+            module = emit(s, directory, fs.read_text(s.root + "/tests/fixtures/" + item.file))
+            native(s, module, directory + "/program", "-O3")
+            sys.set_env("FAZ_GC_STRESS", "1")
+            sys.set_env("FAZ_GC_STATS", "1")
+            result = support.capture(directory + "/program", [])
+            sys.set_env("FAZ_GC_STRESS", stress)
+            sys.set_env("FAZ_GC_STATS", stats)
+            support.success(s, result, item.expected, "optimized GC " + item.file)
+            allocated = support.stat_value(result.err, "allocated")
+            support.check(s, allocated >= 0 and allocated == support.stat_value(result.err, "reclaimed") and support.stat_value(result.err, "live") == 0, "optimized GC reclamation", result.err)
+            if support.contains(item.file, "cycles_and_discarded"):
+                support.check(s, allocated > support.stat_value(result.err, "peak") * 30 and support.stat_value(result.err, "collections") > 1000, "bounded peak for cyclic garbage", result.err)
+    fs.remove_temp(directory)
+
+fn only_ir(s: support.Suite):
+    directory = support.fresh()
+    wrapper_code = "fn main():\n    args = sys.args()\n    llvm = False\n    module = False\n    for i in range(len(args)):\n        if args[i] == \"-x\" and i + 1 < len(args):\n            llvm = args[i + 1] == \"ir\"\n        if len(args[i]) > 3 and args[i][-3:] == \".ll\":\n            module = True\n        assert not (len(args[i]) > 2 and args[i][-2:] == \".c\")\n        assert not (len(args[i]) > 3 and args[i][-3:] == \".cc\")\n        assert not (len(args[i]) > 4 and args[i][-4:] == \".cpp\")\n    assert llvm and module\n    fs.write_text(sys.env(\"FAZ_LLVM_TEST_LOG\"), \"IR only\\n\")\n    sys.exit(sys.run(sys.env(\"FAZ_LLVM_REAL_COMPILER\"), args))\n"
+    fs.write_text(directory + "/wrapper.fz", wrapper_code)
+    wrapper = directory + "/LLVM tool with spaces"
+    support.build(s, directory + "/wrapper.fz", wrapper)
+    original = sys.env("FAZ_CLANG")
+    original_cc = sys.env("CC")
+    sys.set_env("FAZ_LLVM_REAL_COMPILER", bootstrap_checks.clang())
+    sys.set_env("FAZ_LLVM_TEST_LOG", directory + "/log.txt")
+    sys.set_env("FAZ_CLANG", wrapper)
+    sys.set_env("CC", "/nonexistent/C-compiler")
+    fs.write_text(directory + "/input.fz", "fn main():\n    print(\"LLVM\")\n")
+    result = support.capture(s.compiler, ["run", directory + "/input.fz"])
+    sys.set_env("FAZ_CLANG", original)
+    sys.set_env("CC", original_cc)
+    support.success(s, result, "LLVM\n", "driver passes only IR to external compiler")
+    support.check(s, fs.exists(directory + "/log.txt"), "LLVM wrapper invoked", result.err)
+    if fs.exists(directory + "/log.txt"):
+        support.check(s, fs.read_text(directory + "/log.txt") == "IR only\n", "LLVM wrapper validates arguments", "")
+    fs.remove_temp(directory)
+
+fn run(s: support.Suite):
+    print("LLVM optimization contracts")
+    optimized(s)
+    roots(s)
+    only_ir(s)
+    for expression in ["raw.alloc(8)", "raw.load(0)", "raw.call(\"exit\", 0)"]:
+        support.reject(s, "fn main():\n    value = " + expression + "\n", "reserved for the Faz runtime")

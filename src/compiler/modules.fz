@@ -1,0 +1,208 @@
+# File-relative module loading and qualification. Native code only supplies
+# canonical paths and text files; import semantics live in Faz.
+import syntax
+import parser
+
+struct Loader:
+    paths: list[str]
+    namespaces: list[str]
+    active: list[bool]
+    declarations: list[syntax.Node]
+
+struct Resolver:
+    namespace: str
+    aliases: list[str]
+    targets: list[str]
+    symbols: list[str]
+    qualified: list[str]
+
+fn find(values: list[str], value: str) -> int:
+    for index in range(len(values)):
+        if values[index] == value:
+            return index
+    return -1
+
+fn add(values: list[str], value: str):
+    if find(values, value) < 0:
+        values.append(value)
+
+fn reserved(name: str) -> bool:
+    return find(["print", "task", "http", "len", "str", "panic", "range", "int", "bool", "list", "fs", "sys", "raw", "net"], name) >= 0
+
+fn qualify(namespace: str, name: str) -> str:
+    if namespace == "":
+        return name
+    return namespace + "." + name
+
+fn first_dot(name: str) -> int:
+    for index in range(len(name)):
+        if name[index] == ".":
+            return index
+    return -1
+
+fn basename(name: str) -> str:
+    start = 0
+    for index in range(len(name)):
+        if name[index] == ".":
+            start = index + 1
+    return name[start:]
+
+fn parent(path: str) -> str:
+    end = 0
+    for index in range(len(path)):
+        if path[index] == "/":
+            end = index + 1
+    return path[:end]
+
+fn import_path(path: str, name: str) -> str:
+    pieces: list[str] = []
+    for character in name:
+        if character == ".":
+            pieces.append("/")
+        else:
+            pieces.append(character)
+    return parent(path) + str.join(pieces, "") + ".fz"
+
+fn fail(node: syntax.Node, message: str):
+    panic(node.source + ":" + str(node.line) + ":" + str(node.column) + ": " + message)
+
+fn symbol(resolver: Resolver, name: str, locals: list[str]) -> str:
+    dot = first_dot(name)
+    first = name
+    tail = ""
+    if dot >= 0:
+        first = name[:dot]
+        tail = name[dot:]
+    if find(locals, first) >= 0:
+        return name
+    index = find(resolver.aliases, first)
+    if index >= 0:
+        return resolver.targets[index] + tail
+    index = find(resolver.symbols, first)
+    if index >= 0:
+        return resolver.qualified[index] + tail
+    if reserved(first):
+        return name
+    return qualify(resolver.namespace, name)
+
+fn type_name(resolver: Resolver, name: str) -> str:
+    if name == "" or name == "None" or name == "int" or name == "bool" or name == "str":
+        return name
+    if len(name) >= 6:
+        if name[:5] == "list[":
+            return "list[" + type_name(resolver, name[5:-1]) + "]"
+    return symbol(resolver, name, [])
+
+fn path(node: syntax.Node) -> str:
+    if node.kind == "name":
+        return node.text
+    if node.kind == "field":
+        base = path(node.children[0])
+        if base != "":
+            return base + "." + node.text
+    return ""
+
+fn collect_locals(node: syntax.Node, locals: list[str]):
+    if node.kind == "assign" or node.kind == "for" or node.kind == "group":
+        add(locals, node.text)
+    for child in node.children:
+        collect_locals(child, locals)
+
+fn resolve_node(resolver: Resolver, node: syntax.Node, locals: list[str]):
+    if node.kind == "match":
+        resolve_node(resolver, node.children[0], locals)
+        for index in range(1, len(node.children)):
+            arm = node.children[index]
+            if arm.text != "_":
+                arm.text = symbol(resolver, arm.text, [])
+            scope: list[str] = []
+            for name in locals:
+                scope.append(name)
+            for name in arm.names:
+                if find(resolver.aliases, name) >= 0:
+                    fail(arm, "pattern binding conflicts with an import")
+                add(scope, name)
+            for statement in arm.children:
+                resolve_node(resolver, statement, scope)
+        return
+    qualified = path(node)
+    if qualified != "":
+        dot = first_dot(qualified)
+        first = qualified
+        if dot >= 0:
+            first = qualified[:dot]
+        if find(resolver.aliases, first) >= 0 and find(locals, first) < 0:
+            node.kind = "name"
+            node.text = symbol(resolver, qualified, locals)
+            node.children = []
+            return
+    if node.kind == "name" or node.kind == "call":
+        node.text = symbol(resolver, node.text, locals)
+    if node.type_name != "":
+        node.type_name = type_name(resolver, node.type_name)
+    for child in node.children:
+        resolve_node(resolver, child, locals)
+
+fn module(loader: Loader, requested: str, namespace: str) -> str:
+    filename = fs.canonical(requested)
+    existing = find(loader.paths, filename)
+    if existing >= 0:
+        if loader.active[existing]:
+            panic(filename + ":1:1: cyclic import")
+        return loader.namespaces[existing]
+    position = len(loader.paths)
+    loader.paths.append(filename)
+    loader.namespaces.append(namespace)
+    loader.active.append(True)
+    program = parser.parse(fs.read_text(filename), filename)
+    resolver = Resolver(namespace, [], [], [], [])
+    for imported in program.imports:
+        alias = basename(imported.text)
+        if find(resolver.aliases, alias) >= 0 or reserved(alias):
+            fail(imported, "duplicate or reserved import name '" + alias + "'")
+        filename_child = import_path(filename, imported.text)
+        if not fs.exists(filename_child):
+            fail(imported, "cannot read imported module '" + filename_child + "'")
+        target = module(loader, filename_child, "__faz_module." + str(len(loader.paths)))
+        resolver.aliases.append(alias)
+        resolver.targets.append(target)
+    for declaration in program.declarations:
+        name = declaration.text
+        if find(resolver.aliases, name) >= 0 or reserved(name) or find(resolver.symbols, name) >= 0:
+            fail(declaration, "duplicate or reserved declaration '" + name + "'")
+        resolver.symbols.append(name)
+        resolver.qualified.append(qualify(namespace, name))
+    for declaration in program.declarations:
+        if declaration.kind == "fn":
+            locals: list[str] = []
+            for name in declaration.names:
+                add(locals, name)
+            for statement in declaration.children:
+                collect_locals(statement, locals)
+            for name in locals:
+                if find(resolver.aliases, name) >= 0:
+                    fail(declaration, "local '" + name + "' conflicts with an import")
+            declaration.type_name = type_name(resolver, declaration.type_name)
+            for index in range(len(declaration.types)):
+                declaration.types[index] = type_name(resolver, declaration.types[index])
+            for statement in declaration.children:
+                resolve_node(resolver, statement, locals)
+        elif declaration.kind == "struct":
+            for index in range(len(declaration.types)):
+                declaration.types[index] = type_name(resolver, declaration.types[index])
+        elif declaration.kind == "enum":
+            for variant in declaration.children:
+                for index in range(len(variant.types)):
+                    variant.types[index] = type_name(resolver, variant.types[index])
+        declaration.text = qualify(namespace, declaration.text)
+        loader.declarations.append(declaration)
+    loader.active[position] = False
+    return namespace
+
+fn load(filename: str) -> syntax.Program:
+    loader = Loader([], [], [], [])
+    module(loader, filename, "")
+    sources: list[syntax.Node] = []
+    for path in loader.paths:
+        sources.append(syntax.node("source", "", 1, 1, path))
+    return syntax.Program(loader.declarations, sources, fs.canonical(filename))

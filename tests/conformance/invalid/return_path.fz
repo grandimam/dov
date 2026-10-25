@@ -1,0 +1,5 @@
+fn value(ok: bool) -> int:
+    if ok:
+        return 1
+fn main():
+    pass

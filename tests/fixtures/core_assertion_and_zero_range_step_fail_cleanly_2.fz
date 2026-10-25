@@ -1,0 +1,5 @@
+fn message() -> str:
+    panic("should not run")
+fn main():
+    assert True, message()
+    print("ok")

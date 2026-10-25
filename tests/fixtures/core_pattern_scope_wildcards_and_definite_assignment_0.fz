@@ -1,0 +1,27 @@
+enum Value:
+    Number(n: int)
+    Text(s: str)
+    Empty
+
+fn render(value: Value) -> str:
+    match value:
+        case Value.Number(item):
+            result = str(item)
+        case Value.Text(item):
+            result = item
+        case Value.Empty():
+            result = "empty"
+    return result
+
+fn is_empty(value: Value) -> bool:
+    match value:
+        case Value.Empty():
+            return True
+        case _:
+            return False
+
+fn main():
+    item = 99
+    for value in [Value.Number(42), Value.Text("faz"), Value.Empty()]:
+        print(render(value), is_empty(value))
+    print(item)

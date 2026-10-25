@@ -1,0 +1,11 @@
+enum Choice:
+    A
+    B
+fn main():
+    match Choice.A():
+        case Choice.A():
+            pass
+        case Choice.A():
+            pass
+        case _:
+            pass

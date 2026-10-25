@@ -1,0 +1,2 @@
+fn main():
+    items = [1, True]

@@ -1,0 +1,4 @@
+struct A:
+    x: int
+fn main():
+    print(A(1).missing)

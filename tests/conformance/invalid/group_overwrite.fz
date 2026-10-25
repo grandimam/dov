@@ -1,0 +1,3 @@
+fn main():
+    with task.group() as jobs:
+        jobs = 1

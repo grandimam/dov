@@ -1,0 +1,20 @@
+# Compiler data structures, expressed entirely in Faz.
+enum TokenKind:
+    Number(value: int)
+    Plus
+    Minus
+    Star
+    Left
+    Right
+    End
+
+struct Token:
+    kind: TokenKind
+    offset: int
+
+enum Expr:
+    Number(value: int)
+    Add(left: Expr, right: Expr)
+    Subtract(left: Expr, right: Expr)
+    Multiply(left: Expr, right: Expr)
+    Negate(value: Expr)

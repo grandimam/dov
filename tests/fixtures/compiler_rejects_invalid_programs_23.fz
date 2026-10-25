@@ -1,0 +1,5 @@
+fn f() -> int:
+    if True:
+        return 1
+fn main():
+    pass

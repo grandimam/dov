@@ -1,0 +1,145 @@
+{
+  "Task group": {
+    "prefix": "group",
+    "body": [
+      "with task.group() as ${1:group}:",
+      "    ${1:group}.spawn(${2:worker}${3:, argument})",
+      "    $0"
+    ],
+    "description": "Virtual tasks joined automatically on block exit"
+  },
+  "HTTP server": {
+    "prefix": "httpserver",
+    "body": [
+      "fn ${1:handle}(target: str) -> str:",
+      "    return \"${2:Hello from Faz!}\"",
+      "",
+      "fn main():",
+      "    http.serve(\"127.0.0.1\", ${3:8080}, ${1:handle})"
+    ],
+    "description": "A minimal built-in HTTP GET server"
+  },
+  "Main entry point": {
+    "prefix": "main",
+    "body": [
+      "fn main():",
+      "    $0"
+    ],
+    "description": "Faz program entry point"
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:name}(${2:value}: ${3|int,str,bool|}) -> ${4|int,str,bool|}:",
+      "    return ${0:value}"
+    ],
+    "description": "A typed function returning a value"
+  },
+  "Void function": {
+    "prefix": "fnvoid",
+    "body": [
+      "fn ${1:name}(${2}):",
+      "    ${0:pass}"
+    ],
+    "description": "A function with no return value"
+  },
+  "Print": {
+    "prefix": "print",
+    "body": [
+      "print($0)"
+    ],
+    "description": "Print values followed by a newline"
+  },
+  "If / else": {
+    "prefix": "ifelse",
+    "body": [
+      "if ${1:condition}:",
+      "    ${2:pass}",
+      "else:",
+      "    ${0:pass}"
+    ],
+    "description": "Conditional branches"
+  },
+  "While loop": {
+    "prefix": "while",
+    "body": [
+      "while ${1:condition}:",
+      "    ${0:pass}"
+    ],
+    "description": "Loop while a boolean condition is true"
+  },
+  "For loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:item} in ${2:items}:",
+      "    ${0:pass}"
+    ],
+    "description": "Iterate a list snapshot or Unicode string"
+  },
+  "Range loop": {
+    "prefix": "forrange",
+    "body": [
+      "for ${1:i} in range(${2:stop}):",
+      "    ${0:pass}"
+    ],
+    "description": "Iterate integers up to an exclusive stop"
+  },
+  "Record": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Name}:",
+      "    ${2:value}: ${3:int}"
+    ],
+    "description": "Declare a record with typed fields"
+  },
+  "Enum": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Result}:",
+      "    ${2:Ok}(value: ${3:int})",
+      "    ${4:Error}(message: str)"
+    ],
+    "description": "Declare tagged alternatives"
+  },
+  "Match": {
+    "prefix": "match",
+    "body": [
+      "match ${1:result}:",
+      "    case ${2:Result}.${3:Ok}(${4:value}):",
+      "        ${5:pass}",
+      "    case _:",
+      "        ${0:pass}"
+    ],
+    "description": "Inspect an enum with a final wildcard arm"
+  },
+  "Import": {
+    "prefix": "import",
+    "body": [
+      "import ${0:module}"
+    ],
+    "description": "Import a module relative to this file"
+  },
+  "Assertion": {
+    "prefix": "assert",
+    "body": [
+      "assert ${1:condition}, \"${2:message}\""
+    ],
+    "description": "Check a boolean and evaluate the message only on failure"
+  },
+  "Join strings": {
+    "prefix": "strjoin",
+    "body": [
+      "str.join(${1:parts}, \"${2:separator}\")"
+    ],
+    "description": "Join a list of strings with a separator"
+  },
+  "Typed list": {
+    "prefix": "list",
+    "body": [
+      "${1:items}: list[${2:int}] = [",
+      "    $0",
+      "]"
+    ],
+    "description": "Declare a typed list with multiline contents"
+  }
+}

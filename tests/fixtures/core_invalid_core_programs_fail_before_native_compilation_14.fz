@@ -1,0 +1,4 @@
+fn main():
+    for x in range(0):
+        pass
+    print(x)

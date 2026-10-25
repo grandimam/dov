@@ -1,0 +1,2 @@
+fn main():
+    group.spawn(main)

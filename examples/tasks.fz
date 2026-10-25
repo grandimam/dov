@@ -1,0 +1,11 @@
+fn worker(name: str, delay: int):
+    print(name, "started")
+    task.sleep(delay)
+    print(name, "finished")
+
+fn main():
+    with task.group() as group:
+        group.spawn(worker, "first", 30)
+        group.spawn(worker, "second", 10)
+        print("Both tasks scheduled")
+    print("All tasks finished")

@@ -1,0 +1,55 @@
+import compiler.syntax
+struct Node:
+    children: list[syntax.Expr]
+    name: str
+enum Value:
+    Pair(
+        left: int,
+        right: int,
+    )
+    Empty
+fn total(
+    value: Value,
+) -> int:
+    match value:
+        case Value.Pair(left, _,):
+            return left
+        case _:
+            return 0
+fn worker():
+    pass
+fn main():
+    values: list[int] = [
+# comment inside continuation
+        (1 +
+         2),
+0,
+    ]
+    low = -9223372036854775808
+    high = 0009223372036854775807
+    result = not 1 + 2 * 3 == 7 and False or True
+    value = -+1 // 2 % 3
+    print("Unicode: 🍓\n\t", 'a\'b', "\\\"\r")
+    values[0] = 4
+    make().children[0].name = "leaf"
+    make().children[0].children.append(Node())
+    values.append(1)
+    prefix = values[:2]
+    suffix = values[1:]
+    middle = values[1:2]
+    copy = values[:]
+    if result:
+        pass
+    elif low < high:
+        assert True, "yes"
+    else:
+        assert False
+    while True:
+        for i in values:
+            if i == 0:
+                continue
+            break
+        break
+    with task.group() as group:
+        group.spawn(worker)
+    return

@@ -1,0 +1,155 @@
+# TCP client helpers with bounded waits.
+
+fn rt_net_wait(fd: int, events: int, deadline: int) -> int:
+    descriptor = rt_alloc(8)
+    rt_store32(descriptor, fd)
+    rt_store16(descriptor + 4, events)
+    while True:
+        remaining = deadline - rt_now()
+        if remaining < 0:
+            remaining = 0
+        if remaining > 2147483647:
+            remaining = 2147483647
+        result = raw.call("rt_os_poll", descriptor, 1, remaining)
+        if result < 0 and raw.call("rt_os_errno") == 4:
+            continue
+        raw.free(descriptor)
+        if result > 0:
+            return 1
+        return 0
+    return 0
+
+fn rt_net_connect(host: int, port: int, timeout_ms: int, line: int) -> int:
+    if port < 1 or port > 65535:
+        rt_panic(line, raw.address("TCP port must be between 1 and 65535"))
+    if timeout_ms < 0:
+        rt_panic(line, raw.address("network timeout must be nonnegative"))
+    address = rt_alloc(16)
+    raw.call("rt_os_sockaddr_family", address)
+    raw.set_byte(address + 2, port // 256)
+    raw.set_byte(address + 3, port % 256)
+    if raw.call("rt_os_inet_pton", 2, host, address + 4) != 1:
+        raw.free(address)
+        rt_panic(line, raw.address("TCP host must be a numeric IPv4 address"))
+    fd = raw.call("rt_os_socket", 2, 1, 0)
+    if fd < 0:
+        raw.free(address)
+        return -1
+    if raw.call("rt_os_nonblocking", fd) == 0 or raw.call("rt_os_cloexec", fd) != 0:
+        raw.free(address)
+        raw.call("rt_os_close", fd)
+        return -1
+    status = raw.call("rt_os_connect", fd, address, 16)
+    error = raw.call("rt_os_errno")
+    raw.free(address)
+    if status != 0:
+        if raw.call("rt_os_connect_pending", error) == 0:
+            raw.call("rt_os_close", fd)
+            return -1
+        if rt_net_wait(fd, 4, rt_now() + timeout_ms) == 0 or raw.call("rt_os_socket_error", fd) != 0:
+            raw.call("rt_os_close", fd)
+            return -1
+    raw.call("rt_os_ignore_sigpipe")
+    return fd
+
+fn rt_net_send_buffer(fd: int, buffer: int, size: int) -> int:
+    deadline = rt_now() + 5000
+    sent = 0
+    while sent < size:
+        count = raw.call("rt_os_send", fd, buffer + sent, size - sent)
+        if count > 0:
+            sent = sent + count
+        elif count < 0 and raw.call("rt_os_errno") == 4:
+            continue
+        elif count < 0 and raw.call("rt_os_would_block", raw.call("rt_os_errno")) != 0:
+            if rt_net_wait(fd, 4, deadline) == 0:
+                return -1
+        else:
+            return -1
+    return sent
+
+fn rt_net_send(fd: int, text: int, line: int) -> int:
+    return rt_net_send_buffer(fd, text, rt_size(text))
+
+fn rt_net_send_bytes(fd: int, bytes: int, line: int) -> int:
+    size = raw.load(bytes)
+    buffer = rt_alloc(size + 1)
+    i = 0
+    while i < size:
+        value = rt_list_get(bytes, i, line)
+        if value < 0 or value > 255:
+            raw.free(buffer)
+            rt_panic(line, raw.address("byte values must be between 0 and 255"))
+        raw.set_byte(buffer + i, value)
+        i = i + 1
+    result = rt_net_send_buffer(fd, buffer, size)
+    raw.free(buffer)
+    return result
+
+fn rt_net_receive(fd: int, buffer: int, capacity: int, deadline: int) -> int:
+    while True:
+        count = raw.call("rt_os_recv", fd, buffer, capacity)
+        if count >= 0:
+            return count
+        if raw.call("rt_os_errno") == 4:
+            continue
+        if raw.call("rt_os_would_block", raw.call("rt_os_errno")) == 0:
+            return 0
+        if rt_net_wait(fd, 1, deadline) == 0:
+            return 0
+    return 0
+
+fn rt_net_read(fd: int, maxbytes: int, timeout_ms: int, line: int) -> int:
+    if maxbytes < 4:
+        rt_panic(line, raw.address("network read capacity must be at least four bytes"))
+    if timeout_ms < 0:
+        rt_panic(line, raw.address("network timeout must be nonnegative"))
+    # Reserve three bytes to finish a trailing UTF-8 scalar without exceeding
+    # the caller's maximum. Every returned string is independently valid UTF-8.
+    buffer = rt_heap(maxbytes + 1, 0, line)
+    deadline = rt_now() + timeout_ms
+    count = rt_net_receive(fd, buffer, maxbytes - 3, deadline)
+    cursor = 0
+    while cursor < count:
+        byte = raw.byte(buffer + cursor)
+        width = 0
+        if byte > 0 and byte < 128:
+            width = 1
+        elif byte >= 194 and byte <= 223:
+            width = 2
+        elif byte >= 224 and byte <= 239:
+            width = 3
+        elif byte >= 240 and byte <= 244:
+            width = 4
+        if width == 0:
+            rt_panic(line, raw.address("network response is not valid NUL-free UTF-8"))
+        while cursor + width > count:
+            extra = rt_net_receive(fd, buffer + count, cursor + width - count, deadline)
+            if extra == 0:
+                rt_panic(line, raw.address("network response ended within a UTF-8 character"))
+            count = count + extra
+        rt_utf8_width(buffer + cursor, line)
+        cursor = cursor + width
+    return buffer
+
+fn rt_net_close(fd: int, line: int) -> int:
+    raw.call("rt_os_close", fd)
+    return 0
+
+fn rt_net_free_port(line: int) -> int:
+    address = rt_alloc(16)
+    raw.call("rt_os_sockaddr_family", address)
+    raw.call("rt_os_inet_pton", 2, raw.address("127.0.0.1"), address + 4)
+    fd = raw.call("rt_os_socket", 2, 1, 0)
+    if fd < 0:
+        raw.free(address)
+        rt_panic(line, raw.address("cannot allocate TCP port"))
+    if raw.call("rt_os_bind", fd, address, 16) != 0 or raw.call("rt_os_getsockname", fd, address) != 0:
+        raw.call("rt_os_close", fd)
+        raw.free(address)
+        rt_panic(line, raw.address("cannot allocate TCP port"))
+    port = raw.byte(address + 2) * 256 + raw.byte(address + 3)
+    raw.call("rt_os_close", fd)
+    raw.free(address)
+    return port
+

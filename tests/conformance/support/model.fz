@@ -1,0 +1,16 @@
+struct Item:
+    text: str
+
+enum Answer:
+    Good(item: Item)
+    Empty
+
+fn answer(text: str) -> Answer:
+    return Answer.Good(Item(text))
+
+fn handler(target: str) -> str:
+    return "received " + target
+
+fn worker(text: str):
+    task.yield()
+    print(text)

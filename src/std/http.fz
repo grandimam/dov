@@ -1,0 +1,147 @@
+# Minimal HTTP/1.0 and HTTP/1.1 GET server. Socket waits are scheduler safepoints.
+fn rt_http_send(fd: int, data: int, size: int, deadline: int) -> int:
+    cursor = data
+    remaining = size
+    while remaining > 0:
+        if rt_now() >= deadline:
+            return 0
+        count = raw.call("rt_os_send", fd, cursor, remaining)
+        if count > 0:
+            cursor = cursor + count
+            remaining = remaining - count
+        elif count < 0 and raw.call("rt_os_errno") == 4:
+            continue
+        elif count < 0 and raw.call("rt_os_would_block", raw.call("rt_os_errno")) != 0:
+            rt_wait_fd(fd, 4, deadline)
+        else:
+            return 0
+    return 1
+
+fn rt_http_reply(fd: int, status: int, reason: int, body: int) -> int:
+    frame = rt_keep(body, reason, 0)
+    # Header construction stays unmanaged so no intermediate allocation roots.
+    header = rt_alloc(512)
+    size = rt_size(body)
+    count = raw.call("rt_os_http_header", header, status, reason, size)
+    deadline = rt_now() + 5000
+    if count > 0 and count < 512:
+        if rt_http_send(fd, header, count, deadline) != 0:
+            rt_http_send(fd, body, size, deadline)
+    raw.free(header)
+    rt_release(frame)
+    return 0
+
+fn rt_http_client(argument: int) -> int:
+    fd = raw.load(argument)
+    handler = raw.load(argument + 8)
+    raw.free(argument)
+    request = rt_alloc(16385)
+    rt_http_request(fd, handler, request)
+    raw.free(request)
+    raw.call("rt_os_close", fd)
+    return 0
+
+fn rt_http_request(fd: int, handler: int, request: int) -> int:
+    used = 0
+    deadline = rt_now() + 5000
+    complete = False
+    while used < 16384:
+        if rt_now() >= deadline:
+            rt_http_reply(fd, 408, raw.address("Request Timeout"), raw.address("Request timeout\n"))
+            return 0
+        count = raw.call("rt_os_recv", fd, request + used, 16384 - used)
+        if count > 0:
+            i = 0
+            while i < count:
+                if raw.byte(request + used + i) == 0:
+                    rt_http_reply(fd, 400, raw.address("Bad Request"), raw.address("Invalid request\n"))
+                    return 0
+                i = i + 1
+            used = used + count
+            raw.set_byte(request + used, 0)
+            if raw.call("rt_os_strstr", request, raw.address("\r\n\r\n")) != 0:
+                complete = True
+                break
+        elif count < 0 and raw.call("rt_os_errno") == 4:
+            continue
+        elif count < 0 and raw.call("rt_os_would_block", raw.call("rt_os_errno")) != 0:
+            rt_wait_fd(fd, 1, deadline)
+        else:
+            return 0
+    if not complete:
+        rt_http_reply(fd, 431, raw.address("Request Header Fields Too Large"), raw.address("Headers too large\n"))
+        return 0
+    end = raw.call("rt_os_strstr", request, raw.address("\r\n"))
+    if end == 0:
+        rt_http_reply(fd, 400, raw.address("Bad Request"), raw.address("Invalid request\n"))
+        return 0
+    raw.set_byte(end, 0)
+    first = raw.call("rt_os_strchr", request, 32)
+    last = 0
+    if first != 0:
+        last = raw.call("rt_os_strchr", first + 1, 32)
+    if first == 0 or last == 0:
+        rt_http_reply(fd, 400, raw.address("Bad Request"), raw.address("Invalid request line\n"))
+        return 0
+    if rt_string_compare(last + 1, raw.address("HTTP/1.1")) != 0 and rt_string_compare(last + 1, raw.address("HTTP/1.0")) != 0:
+        rt_http_reply(fd, 400, raw.address("Bad Request"), raw.address("Invalid request line\n"))
+        return 0
+    raw.set_byte(first, 0)
+    raw.set_byte(last, 0)
+    if rt_string_compare(request, raw.address("GET")) != 0:
+        rt_http_reply(fd, 405, raw.address("Method Not Allowed"), raw.address("Only GET is supported\n"))
+        return 0
+    target = first + 1
+    if raw.byte(target) != 47:
+        rt_http_reply(fd, 400, raw.address("Bad Request"), raw.address("Expected an origin-form request target\n"))
+        return 0
+    cursor = target
+    while raw.byte(cursor) != 0:
+        if raw.byte(cursor) <= 32 or raw.byte(cursor) == 127:
+            rt_http_reply(fd, 400, raw.address("Bad Request"), raw.address("Invalid request target\n"))
+            return 0
+        cursor = cursor + 1
+    owned_target = rt_copy_string(target, 0)
+    frame = rt_keep(owned_target, 0, 0)
+    body = raw.invoke(handler, owned_target)
+    raw.store(raw.load(frame + 16) + 8, body)
+    rt_http_reply(fd, 200, raw.address("OK"), body)
+    rt_release(frame)
+    return 0
+
+fn rt_http_serve(host: int, port: int, handler: int, line: int) -> int:
+    if port < 1 or port > 65535:
+        rt_panic(line, raw.address("HTTP port must be between 1 and 65535"))
+    address = rt_alloc(16)
+    raw.call("rt_os_sockaddr_family", address)
+    raw.set_byte(address + 2, port // 256)
+    raw.set_byte(address + 3, port % 256)
+    if raw.call("rt_os_inet_pton", 2, host, address + 4) != 1:
+        rt_panic(line, raw.address("HTTP host must be a numeric IPv4 address"))
+    listener = raw.call("rt_os_socket", 2, 1, 0)
+    if listener < 0:
+        rt_panic(line, raw.address("cannot create HTTP socket"))
+    raw.call("rt_os_reuse_address", listener)
+    if raw.call("rt_os_nonblocking", listener) == 0 or raw.call("rt_os_bind", listener, address, 16) != 0 or raw.call("rt_os_listen", listener, 128) != 0:
+        raw.call("rt_os_close", listener)
+        rt_panic(line, raw.address("cannot listen on HTTP address"))
+    raw.free(address)
+    raw.call("rt_os_ignore_sigpipe")
+    clients = rt_group_new()
+    while True:
+        fd = raw.call("rt_os_accept", listener)
+        if fd >= 0:
+            if raw.load(clients) >= 128 or raw.call("rt_os_nonblocking", fd) == 0:
+                raw.call("rt_os_close", fd)
+            else:
+                connection = rt_alloc(16)
+                raw.store(connection, fd)
+                raw.store(connection + 8, handler)
+                rt_spawn(clients, raw.function("rt_http_client"), connection, line)
+            rt_yield()
+        elif raw.call("rt_os_would_block", raw.call("rt_os_errno")) != 0:
+            rt_wait_fd(listener, 1, 9223372036854775807)
+        elif raw.call("rt_os_errno") != 4 and raw.call("rt_os_connection_aborted", raw.call("rt_os_errno")) == 0:
+            raw.call("rt_os_close", listener)
+            rt_panic(line, raw.address("HTTP accept failed"))
+    return 0

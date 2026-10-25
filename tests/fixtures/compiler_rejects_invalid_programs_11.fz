@@ -1,0 +1,4 @@
+fn f(x: int, x: int):
+    pass
+fn main():
+    pass

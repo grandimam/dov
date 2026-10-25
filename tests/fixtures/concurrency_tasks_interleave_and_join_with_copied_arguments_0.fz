@@ -1,0 +1,13 @@
+fn worker(n: int, label: str, ready: bool):
+    print(n, label, ready)
+    task.yield()
+    print(n, "done")
+
+fn main():
+    n = 1
+    with task.group() as group:
+        group.spawn(worker, n, "first", True)
+        n = 2
+        group.spawn(worker, n, "second", False)
+        print("scheduled")
+    print("joined")

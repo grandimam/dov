@@ -1,0 +1,14 @@
+fn main():
+    assert str.join([], ",") == ""
+    assert str.join([], "") == ""
+    assert str.join(["a", "b"], "") == "ab"
+    parts: list[str] = []
+    for i in range(1000):
+        parts.append("abcdefghij" + str(i))
+    text = str.join(parts, "|")
+    fs.write_text("large.txt", text)
+    copy = fs.read_text("large.txt")
+    assert copy == text
+    assert fs.exists(fs.canonical("large.txt"))
+    assert len(sys.args()) == 0
+    print("file ok")

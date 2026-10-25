@@ -1,0 +1,5 @@
+fn worker(items: list[int]):
+    pass
+fn main():
+    with task.group() as group:
+        group.spawn(worker, [1])

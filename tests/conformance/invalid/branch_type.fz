@@ -1,0 +1,5 @@
+fn main():
+    if True:
+        value = 1
+    else:
+        value = "text"

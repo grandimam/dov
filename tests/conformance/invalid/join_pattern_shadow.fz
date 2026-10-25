@@ -1,0 +1,6 @@
+enum Value:
+    Text(value: int)
+fn main():
+    match Value.Text(1):
+        case Value.Text(str):
+            print(str.join(["a"], ","))

@@ -1,0 +1,2 @@
+fn main():
+    values = [1] + [2]

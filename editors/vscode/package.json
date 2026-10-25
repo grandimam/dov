@@ -1,0 +1,72 @@
+{
+  "name": "faz-language",
+  "displayName": "Faz Language",
+  "description": "Syntax highlighting, snippets, and the Blackberry color theme for Faz.",
+  "version": "0.1.0",
+  "publisher": "grandimam",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Themes",
+    "Snippets"
+  ],
+  "keywords": [
+    "faz",
+    "blackberry"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/grandimam/jam.git",
+    "directory": "editors/vscode"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.cjs",
+    "package": "npx @vscode/vsce package"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "faz",
+        "aliases": [
+          "Faz",
+          "faz"
+        ],
+        "extensions": [
+          ".fz"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "faz",
+        "scopeName": "source.faz",
+        "path": "./syntaxes/faz.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "faz",
+        "path": "./snippets/faz.json"
+      }
+    ],
+    "themes": [
+      {
+        "label": "Faz Blackberry",
+        "uiTheme": "vs-dark",
+        "path": "./themes/blackberry-color-theme.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[faz]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4,
+        "editor.detectIndentation": false
+      }
+    }
+  },
+  "icon": "assets/faz.png"
+}

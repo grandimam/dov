@@ -1,0 +1,84 @@
+struct Box:
+    value: int
+    text: str
+    children: list[Box]
+
+enum Tree:
+    Leaf(value: int)
+    Branch(left: Tree, right: Tree)
+
+fn total(tree: Tree) -> int:
+    match tree:
+        case Tree.Leaf(value):
+            return value
+        case Tree.Branch(left, right):
+            return total(left) + total(right)
+
+fn take(values: list[int]) -> int:
+    return values.pop()
+
+fn mutate(values: list[int]) -> bool:
+    values.append(99)
+    return True
+
+fn worker(label: str, count: int):
+    task.yield()
+    print(label, count)
+
+fn message(value: int) -> str:
+    return "worker" + str(value)
+
+fn join() -> str:
+    return "ordinary user function"
+
+fn type_group():
+    with task.group() as Box:
+        pass
+
+fn main():
+    assert str.join([], ",") == ""
+    assert str.join(["a", "b"], "") == "ab"
+    assert join() == "ordinary user function"
+    type_group()
+    box = Box(4, "café 🌍", [])
+    box.children.append(box)
+    box.children[0].value = 42
+    assert box.value == 42
+    print(box.text[0], box.text[3], box.text[-1], box.text[1:4], len(box.text))
+    tree = Tree.Branch(Tree.Leaf(20), Tree.Branch(Tree.Leaf(11), Tree.Leaf(11)))
+    print(total(tree))
+    values = [1, 2, 3]
+    print(take(values), take(values), values[0])
+    assert not (False and mutate(values))
+    assert True or mutate(values)
+    assert len(values) == 1
+    values.append(2)
+    for value in values:
+        values.append(value + 10)
+    assert len(values) == 4
+    sum = 0
+    for number in range(5, -2, -2):
+        sum = sum + number
+    print(sum)
+    nested: list[list[str]] = [[], []]
+    nested[0].append("hello")
+    nested[1] = nested[0]
+    print(nested[1].pop(), len(nested[0]))
+    index = 0
+    while index < 5:
+        index = index + 1
+        if index == 2:
+            continue
+        if index == 4:
+            break
+        print(index)
+    if total(tree) == 42:
+        result = "yes"
+    else:
+        result = "no"
+    print(result, str(True), str(-42), str.join(["a", "b", "c"], ":"))
+    print(-7 // 3, -7 % 3, 7 // -3, 7 % -3)
+    with task.group() as jobs:
+        jobs.spawn(worker, message(1), 42)
+    print("done")
+    print("??/ ??= ??( ??) ??! ??< ??> ??-", "quote \" slash \\")

@@ -1,0 +1,23 @@
+fn empty() -> list[int]:
+    return []
+
+fn extend(values: list[int]):
+    values.append(42)
+
+fn main():
+    values = empty()
+    i = 0
+    while i < 100:
+        values.append(i)
+        i = i + 1
+    alias = values
+    alias[0] = 7
+    extend(values)
+    print(len(values), values[0], values[-1], alias.pop(), len(values))
+    rows: list[list[str]] = [[], ["hello"]]
+    row = rows[0]
+    row.append("world")
+    print(rows[1][0] + " " + rows[0][0])
+    flags = [True, False]
+    flags[1] = True
+    print(flags.pop())

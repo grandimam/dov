@@ -1,0 +1,50 @@
+# Compiler tools are separate from the runtime linked into user programs.
+fn parent(path: str) -> str:
+    end = -1
+    for index in range(len(path)):
+        if path[index] == "/":
+            end = index
+    if end < 0:
+        return "."
+    if end == 0:
+        return "/"
+    return path[:end]
+
+fn error(message: str):
+    sys.error("error: " + message)
+    sys.exit(1)
+
+fn compiler() -> str:
+    explicit = sys.env("FAZ_CLANG")
+    if explicit != "":
+        return explicit
+    installation = parent(sys.executable())
+    bundled = installation + "/../lib/faz/llvm/bin/clang"
+    if fs.exists(bundled):
+        return fs.canonical(bundled)
+    bundled = installation + "/llvm/bin/clang"
+    if fs.exists(bundled):
+        return fs.canonical(bundled)
+    configured = sys.env("FAZ_LLVM_HOME")
+    if configured != "":
+        return configured + "/bin/clang"
+    explicit = sys.env("CC")
+    if explicit != "":
+        return explicit
+    return "clang"
+
+fn native(source: str, binary: str):
+    executable = compiler()
+    args = ["-x", "ir", "-O2", "-Wno-override-module", source, "-o", binary]
+    status = sys.run(executable, args)
+    if status == -1:
+        error("no LLVM compiler found; install Clang, or set FAZ_CLANG to its executable path")
+    if status == -2:
+        error("could not execute LLVM compiler '" + executable + "'")
+    if status != 0:
+        error("LLVM compiler '" + executable + "' failed (status " + str(status) + ")")
+
+fn invoke(executable: str, args: list[str]):
+    status = sys.run(executable, args)
+    if status != 0:
+        error("command failed (status " + str(status) + "): " + executable + " " + str.join(args, " "))

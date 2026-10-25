@@ -1,0 +1,23 @@
+enum Tree:
+    Leaf(value: str)
+    Branch(children: list[Tree])
+fn leaf(n: int) -> Tree:
+    if n == 0:
+        return Tree.Leaf("leaf" + str(n))
+    child = leaf(n - 1)
+    return Tree.Branch([child])
+fn show(tree: Tree) -> str:
+    match tree:
+        case Tree.Leaf(value):
+            return value + str(1)
+        case Tree.Branch(children):
+            return show(children[0]) + str(2)
+fn main():
+    root = leaf(4)
+    values = ["a" + str(0), "b" + str(1)]
+    alias = values
+    for value in values:
+        alias.append(value + str(2))
+    for text in "aé🙂":
+        print(text + "!")
+    print(show(root), str.join(values, ":"))

@@ -1,0 +1,5 @@
+fn work(values: list[int]):
+    pass
+fn main():
+    with task.group() as jobs:
+        jobs.spawn(work, [1])

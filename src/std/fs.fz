@@ -1,0 +1,329 @@
+# Filesystem APIs, temporary directory ownership, and executable installation.
+
+fn rt_file_error(operation: int, path: int, line: int) -> int:
+    raw.call("rt_os_file_error", operation, path, line)
+    return 0
+
+fn rt_read_text(path: int, line: int) -> int:
+    file = raw.call("rt_os_fopen", path, raw.address("rb"))
+    if file == 0:
+        rt_file_error(raw.address("read"), path, line)
+    used = 0
+    capacity = 8192
+    text = rt_heap(capacity, 0, line)
+    frame = rt_keep(path, text, 0)
+    while True:
+        count = raw.call("rt_os_fread", text + used, 1, capacity - used - 1, file)
+        used = used + count
+        if raw.call("rt_os_ferror", file) != 0:
+            saved = raw.call("rt_os_errno")
+            raw.call("rt_os_fclose", file)
+            raw.call("rt_os_set_errno", saved)
+            rt_file_error(raw.address("read"), path, line)
+        if raw.call("rt_os_feof", file) != 0:
+            break
+        if used == capacity - 1:
+            capacity = capacity * 2
+            next = rt_heap(capacity, 0, line)
+            raw.copy(next, text, used)
+            text = next
+            raw.store(raw.load(frame + 16) + 8, text)
+    if raw.call("rt_os_fclose", file) != 0:
+        rt_file_error(raw.address("close"), path, line)
+    i = 0
+    while i < used:
+        if raw.byte(text + i) == 0:
+            rt_panic(line, raw.address("text file contains NUL; binary I/O is not supported"))
+        i = i + 1
+    raw.set_byte(text + used, 0)
+    rt_string_len(text, line)
+    rt_release(frame)
+    return text
+
+fn rt_write_text(path: int, text: int, line: int) -> int:
+    file = raw.call("rt_os_fopen", path, raw.address("wb"))
+    if file == 0:
+        rt_file_error(raw.address("write"), path, line)
+    size = rt_size(text)
+    if raw.call("rt_os_fwrite", text, 1, size, file) != size:
+        saved = raw.call("rt_os_errno")
+        raw.call("rt_os_fclose", file)
+        raw.call("rt_os_set_errno", saved)
+        rt_file_error(raw.address("write"), path, line)
+    if raw.call("rt_os_fclose", file) != 0:
+        rt_file_error(raw.address("close"), path, line)
+    return 0
+
+fn rt_file_exists(path: int) -> int:
+    info = rt_alloc(512)
+    status = raw.call("rt_os_stat", path, info)
+    raw.free(info)
+    if status == 0:
+        return 1
+    return 0
+
+fn rt_file_canonical(path: int, line: int) -> int:
+    native = raw.call("rt_os_realpath", path, 0)
+    if native == 0:
+        rt_file_error(raw.address("resolve"), path, line)
+    result = rt_copy_string(native, line)
+    raw.free(native)
+    return result
+
+fn rt_same_file(a: int, b: int) -> int:
+    left = rt_alloc(512)
+    right = rt_alloc(512)
+    same = 0
+    if raw.call("rt_os_stat", a, left) == 0 and raw.call("rt_os_stat", b, right) == 0:
+        if raw.call("rt_os_stat_device", left) == raw.call("rt_os_stat_device", right):
+            if raw.call("rt_os_stat_inode", left) == raw.call("rt_os_stat_inode", right):
+                same = 1
+    raw.free(left)
+    raw.free(right)
+    return same
+
+fn rt_remove_tree(path: int) -> int:
+    info = rt_alloc(512)
+    if raw.call("rt_os_lstat", path, info) != 0:
+        raw.free(info)
+        return 0
+    mode = raw.call("rt_os_stat_mode", info)
+    raw.free(info)
+    if (mode // 4096) % 16 != 4:
+        raw.call("rt_os_unlink", path)
+        return 0
+    directory = raw.call("rt_os_opendir", path)
+    if directory == 0:
+        return 0
+    while True:
+        entry = raw.call("rt_os_readdir", directory)
+        if entry == 0:
+            break
+        name = raw.call("rt_os_dirent_name", entry)
+        if rt_string_compare(name, raw.address(".")) != 0 and rt_string_compare(name, raw.address("..")) != 0:
+            size = rt_size(path)
+            length = rt_size(name)
+            child = rt_alloc(size + length + 2)
+            raw.copy(child, path, size)
+            raw.set_byte(child + size, 47)
+            raw.copy(child + size + 1, name, length + 1)
+            rt_remove_tree(child)
+            raw.free(child)
+    raw.call("rt_os_closedir", directory)
+    raw.call("rt_os_rmdir", path)
+    return 0
+
+fn rt_cleanup_temps() -> int:
+    entry = raw.global(24)
+    while entry != 0:
+        next = raw.load(entry + 8)
+        rt_remove_tree(raw.load(entry))
+        raw.free(raw.load(entry))
+        raw.free(entry)
+        entry = next
+    raw.set_global(24, 0)
+    return 0
+
+fn rt_temp_directory(line: int) -> int:
+    base = raw.call("rt_os_getenv", raw.address("TMPDIR"))
+    if base == 0 or raw.byte(base) == 0:
+        base = raw.address("/tmp")
+    length = rt_size(base)
+    entry = rt_alloc(16)
+    path = rt_alloc(length + 13)
+    raw.copy(path, base, length)
+    raw.copy(path + length, raw.address("/faz-XXXXXX"), 12)
+    if raw.call("rt_os_mkdtemp", path) == 0:
+        raw.free(path)
+        raw.free(entry)
+        rt_file_error(raw.address("create temporary directory in"), base, line)
+    raw.store(entry, path)
+    raw.store(entry + 8, raw.global(24))
+    raw.set_global(24, entry)
+    if raw.global(27) == 0:
+        raw.set_global(27, 1)
+        if raw.call("rt_os_atexit", raw.function("rt_cleanup_temps")) != 0:
+            rt_cleanup_temps()
+            rt_panic(line, raw.address("cannot register temporary cleanup"))
+    return rt_copy_string(path, line)
+
+fn rt_remove_temp(path: int, line: int) -> int:
+    previous = 0
+    entry = raw.global(24)
+    while entry != 0:
+        if rt_string_compare(raw.load(entry), path) == 0:
+            break
+        previous = entry
+        entry = raw.load(entry + 8)
+    if entry == 0:
+        rt_panic(line, raw.address("can only remove a directory created by fs.temp_dir"))
+    rt_remove_tree(raw.load(entry))
+    if previous == 0:
+        raw.set_global(24, raw.load(entry + 8))
+    else:
+        raw.store(previous + 8, raw.load(entry + 8))
+    raw.free(raw.load(entry))
+    raw.free(entry)
+    return 0
+
+fn rt_make_parent(path: int, line: int) -> int:
+    size = rt_size(path)
+    if size == 0:
+        rt_panic(line, raw.address("path must not be empty"))
+    native = rt_alloc(size + 1)
+    raw.copy(native, path, size + 1)
+    i = 1
+    while i < size:
+        if raw.byte(native + i) == 47:
+            raw.set_byte(native + i, 0)
+            if raw.call("rt_os_mkdir", native, 511) != 0 and raw.call("rt_os_errno") != 17:
+                raw.free(native)
+                rt_file_error(raw.address("create parent directories for"), path, line)
+            raw.set_byte(native + i, 47)
+        i = i + 1
+    raw.free(native)
+    return 0
+
+fn rt_copy_executable(source: int, destination: int, line: int) -> int:
+    if rt_same_file(source, destination) != 0:
+        rt_panic(line, raw.address("cannot copy a file onto itself"))
+    input = raw.call("rt_os_open_read", source)
+    if input < 0:
+        rt_file_error(raw.address("read"), source, line)
+    info = rt_alloc(512)
+    if raw.call("rt_os_fstat", input, info) != 0:
+        saved = raw.call("rt_os_errno")
+        raw.call("rt_os_close", input)
+        raw.call("rt_os_set_errno", saved)
+        rt_file_error(raw.address("inspect"), source, line)
+    mode = raw.call("rt_os_stat_mode", info) % 512
+    raw.free(info)
+    length = rt_size(destination)
+    staging = rt_alloc(length + 12)
+    raw.copy(staging, destination, length)
+    raw.copy(staging + length, raw.address(".fz-XXXXXX"), 12)
+    output = raw.call("rt_os_mkstemp", staging)
+    if output < 0:
+        raw.call("rt_os_close", input)
+        raw.free(staging)
+        rt_file_error(raw.address("stage executable at"), destination, line)
+    buffer = rt_alloc(32768)
+    error = 0
+    while True:
+        count = raw.call("rt_os_read", input, buffer, 32768)
+        if count < 0:
+            if raw.call("rt_os_errno") == 4:
+                continue
+            error = raw.call("rt_os_errno")
+            break
+        if count == 0:
+            break
+        offset = 0
+        while offset < count:
+            written = raw.call("rt_os_write", output, buffer + offset, count - offset)
+            if written < 0 and raw.call("rt_os_errno") == 4:
+                continue
+            if written <= 0:
+                error = 5
+                if written < 0:
+                    error = raw.call("rt_os_errno")
+                break
+            offset = offset + written
+        if error != 0:
+            break
+    raw.free(buffer)
+    if error == 0 and raw.call("rt_os_fchmod", output, mode) != 0:
+        error = raw.call("rt_os_errno")
+    if raw.call("rt_os_close", input) != 0 and error == 0:
+        error = raw.call("rt_os_errno")
+    if raw.call("rt_os_close", output) != 0 and error == 0:
+        error = raw.call("rt_os_errno")
+    if error == 0 and raw.call("rt_os_rename", staging, destination) != 0:
+        error = raw.call("rt_os_errno")
+    if error != 0:
+        raw.call("rt_os_unlink", staging)
+    raw.free(staging)
+    if error != 0:
+        raw.call("rt_os_set_errno", error)
+        rt_file_error(raw.address("copy executable to"), destination, line)
+    return 0
+
+fn rt_directory_entries(path: int, line: int) -> int:
+    directory = raw.call("rt_os_opendir", path)
+    if directory == 0:
+        rt_file_error(raw.address("list directory"), path, line)
+    result = rt_list_new(1, line)
+    frame = rt_keep(result, 0, 0)
+    while True:
+        raw.call("rt_os_set_errno", 0)
+        entry = raw.call("rt_os_readdir", directory)
+        if entry == 0:
+            if raw.call("rt_os_errno") != 0:
+                saved = raw.call("rt_os_errno")
+                raw.call("rt_os_closedir", directory)
+                raw.call("rt_os_set_errno", saved)
+                rt_file_error(raw.address("list directory"), path, line)
+            break
+        name = raw.call("rt_os_dirent_name", entry)
+        if rt_string_compare(name, raw.address(".")) != 0 and rt_string_compare(name, raw.address("..")) != 0:
+            rt_list_append(result, rt_copy_string(name, line), line)
+    raw.call("rt_os_closedir", directory)
+    # Deterministic bytewise ordering; no managed allocations in the sort.
+    items = raw.load(result + 16)
+    i = 1
+    while i < raw.load(result):
+        value = raw.load(items + i * 8)
+        j = i
+        while j > 0:
+            previous = raw.load(items + (j - 1) * 8)
+            if rt_string_compare(previous, value) <= 0:
+                break
+            raw.store(items + j * 8, previous)
+            j = j - 1
+        raw.store(items + j * 8, value)
+        i = i + 1
+    rt_release(frame)
+    return result
+
+fn rt_write_bytes(path: int, bytes: int, line: int) -> int:
+    count = raw.load(bytes)
+    i = 0
+    while i < count:
+        value = rt_list_get(bytes, i, line)
+        if value < 0 or value > 255:
+            rt_panic(line, raw.address("byte values must be between 0 and 255"))
+        i = i + 1
+    file = raw.call("rt_os_fopen", path, raw.address("wb"))
+    if file == 0:
+        rt_file_error(raw.address("write"), path, line)
+    buffer = rt_alloc(8192)
+    i = 0
+    while i < count:
+        used = 0
+        while i < count and used < 8192:
+            raw.set_byte(buffer + used, rt_list_get(bytes, i, line))
+            i = i + 1
+            used = used + 1
+        if raw.call("rt_os_fwrite", buffer, 1, used, file) != used:
+            saved = raw.call("rt_os_errno")
+            raw.free(buffer)
+            raw.call("rt_os_fclose", file)
+            raw.call("rt_os_set_errno", saved)
+            rt_file_error(raw.address("write"), path, line)
+    raw.free(buffer)
+    if raw.call("rt_os_fclose", file) != 0:
+        rt_file_error(raw.address("close"), path, line)
+    return 0
+
+fn rt_symlink(source: int, destination: int, line: int) -> int:
+    if raw.call("rt_os_symlink", source, destination) != 0:
+        rt_file_error(raw.address("create symbolic link at"), destination, line)
+    return 0
+
+fn rt_hardlink(source: int, destination: int, line: int) -> int:
+    if raw.call("rt_os_link", source, destination) != 0:
+        rt_file_error(raw.address("create hard link at"), destination, line)
+    return 0
+
+# Blocking client sockets for tools. They use poll deadlines independently of
+# cooperative HTTP server tasks, just as sys.run blocks its calling task.

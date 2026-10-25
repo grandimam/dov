@@ -1,0 +1,28 @@
+# Shared, recursively shaped syntax tree for the native Faz compiler.
+struct Token:
+    kind: str
+    text: str
+    line: int
+    column: int
+
+struct Node:
+    kind: str
+    text: str
+    type_name: str
+    line: int
+    column: int
+    source: str
+    children: list[Node]
+    names: list[str]
+    types: list[str]
+
+struct Program:
+    declarations: list[Node]
+    imports: list[Node]
+    source: str
+
+fn node(kind: str, text: str, line: int, column: int, source: str) -> Node:
+    children: list[Node] = []
+    names: list[str] = []
+    types: list[str] = []
+    return Node(kind, text, "", line, column, source, children, names, types)

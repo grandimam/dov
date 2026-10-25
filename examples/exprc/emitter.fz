@@ -1,0 +1,38 @@
+import syntax
+
+struct Generator:
+    lines: list[str]
+    next: int
+
+fn arithmetic(g: Generator, operation: str, left: str, right: str) -> str:
+    index = str(g.next)
+    g.next = g.next + 1
+    g.lines.append("  %pair" + index + " = call {i64, i1} @llvm." + operation + ".with.overflow.i64(i64 " + left + ", i64 " + right + ")\n")
+    g.lines.append("  %overflow" + index + " = extractvalue {i64, i1} %pair" + index + ", 1\n")
+    g.lines.append("  br i1 %overflow" + index + ", label %overflow, label %ok" + index + "\nok" + index + ":\n")
+    g.lines.append("  %value" + index + " = extractvalue {i64, i1} %pair" + index + ", 0\n")
+    return "%value" + index
+
+fn emit(g: Generator, expression: syntax.Expr) -> str:
+    match expression:
+        case syntax.Expr.Number(value):
+            return str(value)
+        case syntax.Expr.Add(left, right):
+            return arithmetic(g, "sadd", emit(g, left), emit(g, right))
+        case syntax.Expr.Subtract(left, right):
+            return arithmetic(g, "ssub", emit(g, left), emit(g, right))
+        case syntax.Expr.Multiply(left, right):
+            return arithmetic(g, "smul", emit(g, left), emit(g, right))
+        case syntax.Expr.Negate(value):
+            return arithmetic(g, "ssub", "0", emit(g, value))
+
+fn program(expression: syntax.Expr) -> str:
+    g = Generator([], 0)
+    result = emit(g, expression)
+    header = "; Expression compiler output: native LLVM IR\n@format = private constant [6 x i8] c\"%lld\\0A\\00\"\n"
+    declarations = "declare i32 @printf(ptr, ...)\ndeclare void @exit(i32)\n"
+    for operation in ["sadd", "ssub", "smul"]:
+        declarations = declarations + "declare {i64, i1} @llvm." + operation + ".with.overflow.i64(i64, i64)\n"
+    main = "define i32 @main() {\nentry:\n" + str.join(g.lines, "")
+    main = main + "  %printed = call i32 (ptr, ...) @printf(ptr @format, i64 " + result + ")\n  ret i32 0\noverflow:\n  call void @exit(i32 2)\n  unreachable\n}\n"
+    return header + declarations + main

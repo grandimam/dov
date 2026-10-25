@@ -1,0 +1,99 @@
+# Shared native test harness. Tests invoke compiled Faz programs directly.
+struct Suite:
+    compiler: str
+    root: str
+    checks: int
+    failed: int
+
+struct Result:
+    status: int
+    out: str
+    err: str
+
+fn check(s: Suite, condition: bool, name: str, details: str):
+    s.checks = s.checks + 1
+    if not condition:
+        s.failed = s.failed + 1
+        print("FAIL:", name)
+        print(details)
+
+fn number(text: str) -> int:
+    result = 0
+    sign = 1
+    for ch in text:
+        if ch == "-":
+            sign = -1
+        elif ch >= "0" and ch <= "9":
+            result = result * 10 + str.byte_at(ch, 0) - 48
+    return result * sign
+
+fn contains(text: str, part: str) -> bool:
+    return str.contains(text, part)
+
+fn starts(text: str, prefix: str) -> bool:
+    return len(text) >= len(prefix) and text[:len(prefix)] == prefix
+
+fn ends(text: str, suffix: str) -> bool:
+    return len(text) >= len(suffix) and text[len(text) - len(suffix):] == suffix
+
+fn capture(executable: str, args: list[str]) -> Result:
+    values = sys.capture(executable, args, 60000)
+    return Result(number(values[0]), values[1], values[2])
+
+fn success(s: Suite, result: Result, expected: str, name: str):
+    check(s, result.status == 0 and result.out == expected, name, "status " + str(result.status) + "\n" + result.out + result.err)
+
+fn fresh() -> str:
+    return fs.temp_dir()
+
+fn build(s: Suite, source: str, output: str):
+    stress = sys.env("FAZ_GC_STRESS")
+    stats = sys.env("FAZ_GC_STATS")
+    sys.set_env("FAZ_GC_STRESS", "0")
+    sys.set_env("FAZ_GC_STATS", "0")
+    result = capture(s.compiler, ["build", source, "-o", output])
+    sys.set_env("FAZ_GC_STRESS", stress)
+    sys.set_env("FAZ_GC_STATS", stats)
+    check(s, result.status == 0, "build " + source, result.out + result.err)
+
+fn source(s: Suite, directory: str, code: str) -> str:
+    path = directory + "/main.fz"
+    binary = directory + "/program"
+    fs.write_text(path, code)
+    build(s, path, binary)
+    return binary
+
+fn run_source(s: Suite, code: str, expected: str) -> Result:
+    directory = fresh()
+    binary = source(s, directory, code)
+    result = capture(binary, [])
+    success(s, result, expected, "program output")
+    fs.remove_temp(directory)
+    return result
+
+fn reject(s: Suite, code: str, diagnostic: str) -> Result:
+    directory = fresh()
+    path = directory + "/main.fz"
+    fs.write_text(path, code)
+    result = capture(s.compiler, ["check", path])
+    check(s, result.status != 0 and contains(result.err, ".fz:") and contains(result.err, diagnostic), "reject " + diagnostic, result.out + result.err)
+    fs.remove_temp(directory)
+    return result
+
+fn runtime_failure(s: Suite, code: str, message: str) -> Result:
+    directory = fresh()
+    binary = source(s, directory, code)
+    result = capture(binary, [])
+    check(s, result.status != 0 and contains(result.err, message), "runtime error " + message, result.out + result.err)
+    fs.remove_temp(directory)
+    return result
+
+fn stat_value(text: str, name: str) -> int:
+    key = name + "="
+    for i in range(len(text) - len(key) + 1):
+        if text[i:i + len(key)] == key:
+            end = i + len(key)
+            while end < len(text) and text[end] >= "0" and text[end] <= "9":
+                end = end + 1
+            return number(text[i + len(key):end])
+    return -1

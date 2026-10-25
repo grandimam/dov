@@ -1,0 +1,4 @@
+fn value(n: int, n: str):
+    pass
+fn main():
+    pass

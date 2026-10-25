@@ -1,0 +1,196 @@
+# Cooperative stackful scheduler, one OS thread. Each suspended fiber owns roots.
+# Task words: next,context,stack,stack-size,entry,arg,roots,parent,waiting,state,
+# fd,events,deadline. State: ready=0,timer=1,io=2,join=3,done=4.
+fn rt_now() -> int:
+    return raw.call("rt_os_nanoseconds") // 1000000
+
+fn rt_group_new() -> int:
+    return rt_alloc(8)
+
+fn rt_task_roots() -> int:
+    fiber = raw.global(22)
+    while fiber != 0:
+        rt_mark_roots(raw.load(fiber + 48))
+        rt_mark(raw.load(fiber + 40))
+        fiber = raw.load(fiber)
+    current = raw.global(21)
+    if current != 0:
+        rt_mark(raw.load(current + 40))
+    return 0
+
+fn rt_suspend() -> int:
+    current = raw.global(21)
+    raw.store(current + 48, raw.global(1))
+    raw.set_global(1, 0)
+    if raw.call("rt_os_swapcontext", raw.load(current + 8), raw.global(20)) != 0:
+        rt_panic(0, raw.address("task context switch failed"))
+    return 0
+
+fn rt_yield() -> int:
+    raw.store(raw.global(21) + 72, 0)
+    return rt_suspend()
+
+fn rt_sleep(ms: int, line: int) -> int:
+    if ms < 0:
+        rt_panic(line, raw.address("sleep duration must be nonnegative"))
+    raw.store(raw.global(21) + 96, rt_now() + ms)
+    raw.store(raw.global(21) + 72, 1)
+    return rt_suspend()
+
+fn rt_wait_fd(fd: int, events: int, deadline: int) -> int:
+    current = raw.global(21)
+    raw.store(current + 80, fd)
+    raw.store(current + 88, events)
+    raw.store(current + 96, deadline)
+    raw.store(current + 72, 2)
+    return rt_suspend()
+
+fn rt_group_join(group: int) -> int:
+    while raw.load(group) != 0:
+        current = raw.global(21)
+        raw.store(current + 64, group)
+        raw.store(current + 72, 3)
+        rt_suspend()
+    raw.store(raw.global(21) + 64, 0)
+    raw.free(group)
+    return 0
+
+fn rt_trampoline() -> int:
+    current = raw.global(21)
+    argument = raw.load(current + 40)
+    raw.store(current + 40, 0)
+    raw.invoke(raw.load(current + 32), argument)
+    current = raw.global(21)
+    parent = raw.load(current + 56)
+    if parent != 0:
+        raw.store(parent, raw.load(parent) - 1)
+    raw.store(current + 72, 4)
+    rt_suspend()
+    rt_panic(0, raw.address("completed task resumed"))
+    return 0
+
+fn rt_spawn(parent: int, entry: int, argument: int, line: int) -> int:
+    if raw.global(23) >= 4096:
+        rt_panic(line, raw.address("virtual task limit (4096) exceeded"))
+    fiber = rt_alloc(104)
+    context = rt_alloc(8192)
+    if raw.call("rt_os_getcontext", context) != 0:
+        rt_panic(line, raw.address("cannot create task context"))
+    page = raw.call("rt_os_page_size")
+    if page <= 0:
+        rt_panic(line, raw.address("cannot determine page size"))
+    usable = ((262144 + page - 1) // page) * page
+    size = usable + page * 2
+    stack = raw.call("rt_os_mmap_stack", size)
+    if stack == -1:
+        rt_panic(line, raw.address("cannot allocate task stack"))
+    if raw.call("rt_os_mprotect_stack", stack + page, usable) != 0:
+        rt_panic(line, raw.address("cannot protect task stack"))
+    raw.call("rt_os_prepare_context", context, stack + page, usable, raw.global(20), raw.function("rt_trampoline"))
+    raw.store(fiber + 8, context)
+    raw.store(fiber + 16, stack)
+    raw.store(fiber + 24, size)
+    raw.store(fiber + 32, entry)
+    raw.store(fiber + 40, argument)
+    raw.store(fiber + 56, parent)
+    raw.store(fiber + 96, 9223372036854775807)
+    tail = raw.global(22)
+    if tail == 0:
+        raw.set_global(22, fiber)
+    else:
+        while raw.load(tail) != 0:
+            tail = raw.load(tail)
+        raw.store(tail, fiber)
+    if parent != 0:
+        raw.store(parent, raw.load(parent) + 1)
+    raw.set_global(23, raw.global(23) + 1)
+    return 0
+
+fn rt_run(entry: int) -> int:
+    scheduler = rt_alloc(8192)
+    raw.set_global(20, scheduler)
+    rt_spawn(0, entry, 0, 0)
+    while raw.global(22) != 0:
+        fds = rt_alloc(raw.global(23) * 8)
+        count = 0
+        timeout = -1
+        now = rt_now()
+        fiber = raw.global(22)
+        while fiber != 0:
+            state = raw.load(fiber + 72)
+            deadline = raw.load(fiber + 96)
+            if state == 3 and raw.load(raw.load(fiber + 64)) == 0:
+                state = 0
+            if (state == 1 or state == 2) and deadline <= now:
+                state = 0
+            raw.store(fiber + 72, state)
+            if state == 0:
+                timeout = 0
+            if state == 1 or (state == 2 and deadline != 9223372036854775807):
+                remaining = deadline - now
+                if remaining > 2147483647:
+                    remaining = 2147483647
+                if timeout < 0 or remaining < timeout:
+                    timeout = remaining
+            if state == 2:
+                rt_store32(fds + count * 8, raw.load(fiber + 80))
+                rt_store16(fds + count * 8 + 4, raw.load(fiber + 88))
+                count = count + 1
+            fiber = raw.load(fiber)
+        if timeout < 0 and count == 0:
+            rt_panic(0, raw.address("task deadlock"))
+        ready = raw.call("rt_os_poll", fds, count, timeout)
+        if ready < 0 and raw.call("rt_os_errno") != 4:
+            rt_panic(0, raw.address("I/O polling failed"))
+        now = rt_now()
+        index = 0
+        fiber = raw.global(22)
+        while fiber != 0:
+            state = raw.load(fiber + 72)
+            if state == 2:
+                if rt_load16(fds + index * 8 + 6) != 0 or raw.load(fiber + 96) <= now:
+                    raw.store(fiber + 72, 0)
+                index = index + 1
+            elif state == 1 and raw.load(fiber + 96) <= now:
+                raw.store(fiber + 72, 0)
+            fiber = raw.load(fiber)
+        raw.free(fds)
+        previous = 0
+        fiber = raw.global(22)
+        while fiber != 0:
+            if raw.load(fiber + 72) == 0:
+                break
+            previous = fiber
+            fiber = raw.load(fiber)
+        if fiber == 0:
+            continue
+        if previous == 0:
+            raw.set_global(22, raw.load(fiber))
+        else:
+            raw.store(previous, raw.load(fiber))
+        raw.store(fiber, 0)
+        raw.set_global(21, fiber)
+        raw.set_global(1, raw.load(fiber + 48))
+        if raw.call("rt_os_swapcontext", scheduler, raw.load(fiber + 8)) != 0:
+            rt_panic(0, raw.address("scheduler switch failed"))
+        if raw.load(fiber + 72) == 4:
+            raw.call("rt_os_munmap", raw.load(fiber + 16), raw.load(fiber + 24))
+            raw.free(raw.load(fiber + 8))
+            raw.free(fiber)
+            raw.set_global(23, raw.global(23) - 1)
+        else:
+            tail = raw.global(22)
+            if tail == 0:
+                raw.set_global(22, fiber)
+            else:
+                while raw.load(tail) != 0:
+                    tail = raw.load(tail)
+                raw.store(tail, fiber)
+        raw.set_global(21, 0)
+    raw.free(scheduler)
+    raw.set_global(20, 0)
+    return 0
+
+fn rt_shutdown() -> int:
+    rt_cleanup_temps()
+    return rt_heap_free()

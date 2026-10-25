@@ -1,0 +1,705 @@
+# Type checking and definite assignment, independent of code generation.
+import syntax
+
+struct Binding:
+    name: str
+    ty: str
+
+struct Checker:
+    program: syntax.Program
+    locals: list[Binding]
+    bindings: list[Binding]
+    assigned: list[str]
+    declared: list[str]
+    groups: list[str]
+    loops: int
+    result: str
+    internal: bool
+
+fn fail(n: syntax.Node, message: str):
+    panic(n.source + ":" + str(n.line) + ":" + str(n.column) + ": " + message)
+
+fn has(items: list[str], name: str) -> bool:
+    for index in range(len(items)):
+        if items[index] == name:
+            return True
+    return False
+
+fn copy(items: list[str]) -> list[str]:
+    out: list[str] = []
+    for index in range(len(items)):
+        out.append(items[index])
+    return out
+
+fn intersect(a: list[str], b: list[str]) -> list[str]:
+    out: list[str] = []
+    for index in range(len(a)):
+        if has(b, a[index]):
+            out.append(a[index])
+    return out
+
+fn position(items: list[Binding], name: str) -> int:
+    i = len(items) - 1
+    while i >= 0:
+        if items[i].name == name:
+            return i
+        i = i - 1
+    return -1
+
+fn reserved(name: str) -> bool:
+    return has(["print", "task", "http", "len", "str", "panic", "range", "int", "bool", "list", "fs", "sys", "raw", "net"], name)
+
+fn namespace(name: str) -> bool:
+    return has(["task", "http", "fs", "sys", "raw", "net"], name)
+
+fn list_type(ty: str) -> bool:
+    return len(ty) > 5 and ty[:5] == "list["
+
+fn element(ty: str) -> str:
+    return ty[5:len(ty) - 1]
+
+fn managed(ty: str) -> bool:
+    return ty != "int" and ty != "bool" and ty != "None" and ty != ""
+
+fn suffix(text: str, ending: str) -> bool:
+    return len(text) >= len(ending) and text[len(text) - len(ending):] == ending
+
+fn cname(name: str) -> str:
+    out = ""
+    start = 0
+    for i in range(len(name) + 1):
+        if i == len(name) or name[i] == ".":
+            out = out + str(i - start) + "_" + name[start:i]
+            start = i + 1
+    return out
+
+fn declaration(p: syntax.Program, name: str) -> int:
+    for i in range(len(p.declarations)):
+        if p.declarations[i].text == name:
+            return i
+    return -1
+
+fn expect(n: syntax.Node, actual: str, wanted: str):
+    if actual != wanted:
+        fail(n, "expected " + wanted + ", got " + actual)
+
+fn validate(p: syntax.Program, n: syntax.Node, ty: str):
+    if list_type(ty):
+        validate(p, n, element(ty))
+    elif not has(["int", "bool", "str", "None"], ty):
+        i = declaration(p, ty)
+        if i < 0 or p.declarations[i].kind == "fn":
+            fail(n, "unknown type '" + ty + "'")
+
+fn validate_fields(p: syntax.Program, n: syntax.Node):
+    seen: list[str] = []
+    for i in range(len(n.names)):
+        if has(seen, n.names[i]):
+            fail(n, "duplicate field or parameter '" + n.names[i] + "'")
+        seen.append(n.names[i])
+        validate(p, n, n.types[i])
+
+fn declarations(p: syntax.Program, require_main: bool):
+    seen: list[str] = []
+    main_found = False
+    for n in p.declarations:
+        if has(seen, n.text):
+            fail(n, "duplicate declaration '" + n.text + "'")
+        seen.append(n.text)
+        if reserved(n.text):
+            fail(n, "reserved declaration '" + n.text + "'")
+        validate_fields(p, n)
+        if n.kind == "fn":
+            validate(p, n, n.type_name)
+            for name in n.names:
+                if namespace(name):
+                    fail(n, "reserved parameter '" + name + "'")
+            if n.text == "main":
+                main_found = True
+                if len(n.names) != 0 or n.type_name != "None":
+                    fail(n, "entry point must be 'fn main():'")
+        elif n.kind == "enum":
+            variants: list[str] = []
+            for variant in n.children:
+                if has(variants, variant.text):
+                    fail(variant, "duplicate variant '" + variant.text + "'")
+                variants.append(variant.text)
+                validate_fields(p, variant)
+    if require_main and not main_found:
+        panic(p.source + ":1:1: missing entry point 'fn main():'")
+
+fn bind(g: Checker, n: syntax.Node, name: str, ty: str):
+    if namespace(name) or position(g.bindings, name) >= 0 or has(g.groups, name):
+        fail(n, "cannot bind reserved or active name '" + name + "'")
+    i = position(g.locals, name)
+    if i >= 0:
+        expect(n, ty, g.locals[i].ty)
+    else:
+        g.locals.append(Binding(name, ty))
+    if not has(g.assigned, name):
+        g.assigned.append(name)
+
+fn collect_locals(body: list[syntax.Node], names: list[str]):
+    for n in body:
+        if n.kind == "assign" or n.kind == "for" or n.kind == "group":
+            if not has(names, n.text):
+                names.append(n.text)
+        collect_locals(n.children, names)
+
+fn field(g: Checker, n: syntax.Node, base: str, name: str) -> str:
+    i = declaration(g.program, base)
+    if i < 0 or g.program.declarations[i].kind != "struct":
+        fail(n, "field access requires a struct")
+    d = g.program.declarations[i]
+    for j in range(len(d.names)):
+        if d.names[j] == name:
+            return d.types[j]
+    fail(n, "'" + base + "' has no field '" + name + "'")
+    return "None"
+
+fn named(g: Checker, n: syntax.Node, path: str) -> str:
+    end = 0
+    while end < len(path) and path[end] != ".":
+        end = end + 1
+    name_node = syntax.node("name", path[:end], n.line, n.column, n.source)
+    ty = expression(g, name_node, "")
+    while end < len(path):
+        start = end + 1
+        end = start
+        while end < len(path) and path[end] != ".":
+            end = end + 1
+        ty = field(g, n, ty, path[start:end])
+    return ty
+
+fn method(g: Checker, n: syntax.Node, base: str, name: str, args: list[syntax.Node]) -> str:
+    if not list_type(base):
+        fail(n, "list methods require a list receiver")
+    ty = element(base)
+    if name == "append":
+        if len(args) != 1:
+            fail(n, "append expects one element")
+        expect(n, expression(g, args[0], ty), ty)
+        return "None"
+    if name == "pop":
+        if len(args) != 0:
+            fail(n, "pop expects no arguments")
+        return ty
+    fail(n, "unknown list method '" + name + "'")
+    return "None"
+
+fn arguments(g: Checker, n: syntax.Node, args: list[syntax.Node], types: list[str]):
+    if len(args) != len(types):
+        fail(n, "'" + n.text + "' expects " + str(len(types)) + " arguments, got " + str(len(args)))
+    for i in range(len(args)):
+        expect(args[i], expression(g, args[i], types[i]), types[i])
+
+fn construct(g: Checker, n: syntax.Node) -> str:
+    index = declaration(g.program, n.text)
+    typename = n.text
+    fields: list[str] = []
+    found = False
+    if index >= 0 and g.program.declarations[index].kind == "struct":
+        fields = g.program.declarations[index].types
+        found = True
+    else:
+        split = len(n.text) - 1
+        while split >= 0 and n.text[split] != ".":
+            split = split - 1
+        if split >= 0:
+            typename = n.text[:split]
+            index = declaration(g.program, typename)
+            if index >= 0 and g.program.declarations[index].kind == "enum":
+                variants = g.program.declarations[index].children
+                for i in range(len(variants)):
+                    if variants[i].text == n.text[split + 1:]:
+                        fields = variants[i].types
+                        found = True
+                if not found:
+                    fail(n, "unknown variant '" + n.text + "'")
+    if not found:
+        return ""
+    root = 0
+    while root < len(typename) and typename[root] != ".":
+        root = root + 1
+    if has(g.declared, typename[:root]) or position(g.bindings, typename[:root]) >= 0:
+        fail(n, "variable '" + typename[:root] + "' is not callable")
+    arguments(g, n, n.children, fields)
+    return typename
+
+fn raw_builtin(g: Checker, n: syntax.Node) -> str:
+    if not g.internal:
+        fail(n, "raw intrinsics are reserved for the Faz runtime")
+    types: list[str] = []
+    name = n.text
+    if has(["raw.alloc", "raw.free", "raw.load", "raw.byte", "raw.string", "raw.global"], name):
+        types = ["int"]
+    elif has(["raw.store", "raw.set_byte", "raw.set_global", "raw.invoke"], name):
+        types = ["int", "int"]
+    elif name == "raw.copy" or name == "raw.invoke2":
+        types = ["int", "int", "int"]
+    elif name == "raw.address" or name == "raw.fn" or name == "raw.function":
+        types = ["str"]
+    elif name == "raw.call":
+        if len(n.children) < 1 or len(n.children) > 9:
+            fail(n, "raw.call expects a literal symbol and up to eight integer arguments")
+        types.append("str")
+        for i in range(1, len(n.children)):
+            types.append("int")
+    else:
+        fail(n, "unknown runtime intrinsic '" + name + "'")
+    arguments(g, n, n.children, types)
+    if name == "raw.call" or name == "raw.fn" or name == "raw.function":
+        if n.children[0].kind != "str" or n.children[0].text == "":
+            fail(n, name + " requires a literal symbol name")
+        for ch in n.children[0].text:
+            if not ((ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch == "_" or ch == "."):
+                fail(n, "invalid runtime symbol name")
+    if n.text == "raw.string":
+        return "str"
+    return "int"
+
+fn builtin(g: Checker, n: syntax.Node) -> str:
+    name = n.text
+    args = n.children
+    if len(name) > 4 and name[:4] == "raw.":
+        return raw_builtin(g, n)
+    if suffix(name, ".append"):
+        return method(g, n, named(g, n, name[:len(name) - 7]), "append", args)
+    if suffix(name, ".pop"):
+        return method(g, n, named(g, n, name[:len(name) - 4]), "pop", args)
+    if name == "range":
+        fail(n, "range is supported only as a for-loop iterable")
+    if name == "str.byte_len" or name == "str.byte_at" or name == "str.join" or name == "str.contains":
+        if has(g.declared, "str") or position(g.bindings, "str") >= 0:
+            fail(n, "variable 'str' is not callable")
+        if name == "str.contains":
+            arguments(g, n, args, ["str", "str"])
+            return "bool"
+        if name == "str.byte_len":
+            arguments(g, n, args, ["str"])
+            return "int"
+        if name == "str.byte_at":
+            arguments(g, n, args, ["str", "int"])
+            return "int"
+        arguments(g, n, args, ["list[str]", "str"])
+        return "str"
+    if name == "net.connect":
+        arguments(g, n, args, ["str", "int", "int"])
+        return "int"
+    if name == "net.send":
+        arguments(g, n, args, ["int", "str"])
+        return "int"
+    if name == "net.send_bytes":
+        arguments(g, n, args, ["int", "list[int]"])
+        return "int"
+    if name == "net.read":
+        arguments(g, n, args, ["int", "int", "int"])
+        return "str"
+    if name == "net.close":
+        arguments(g, n, args, ["int"])
+        return "None"
+    if name == "net.free_port":
+        arguments(g, n, args, [])
+        return "int"
+    if name == "sys.capture":
+        arguments(g, n, args, ["str", "list[str]", "int"])
+        return "list[str]"
+    if name == "sys.start":
+        arguments(g, n, args, ["str", "list[str]"])
+        return "int"
+    if name == "sys.wait" or name == "sys.kill":
+        arguments(g, n, args, ["int"])
+        if name == "sys.wait":
+            return "int"
+        return "None"
+    if name == "sys.executable" or name == "sys.cwd":
+        arguments(g, n, args, [])
+        return "str"
+    if name == "sys.chdir":
+        arguments(g, n, args, ["str"])
+        return "None"
+    if name == "sys.set_env" or name == "fs.symlink" or name == "fs.hardlink":
+        arguments(g, n, args, ["str", "str"])
+        return "None"
+    if name == "fs.entries":
+        arguments(g, n, args, ["str"])
+        return "list[str]"
+    if name == "fs.write_bytes":
+        arguments(g, n, args, ["str", "list[int]"])
+        return "None"
+    if name == "sys.args":
+        arguments(g, n, args, [])
+        return "list[str]"
+    if name == "sys.platform":
+        arguments(g, n, args, [])
+        return "str"
+    if name == "sys.env" or name == "fs.read_text" or name == "fs.canonical":
+        arguments(g, n, args, ["str"])
+        return "str"
+    if name == "sys.run":
+        arguments(g, n, args, ["str", "list[str]"])
+        return "int"
+    if name == "sys.exit" or name == "task.sleep":
+        arguments(g, n, args, ["int"])
+        return "None"
+    if name == "sys.error" or name == "fs.make_parent" or name == "fs.remove_temp" or name == "panic":
+        arguments(g, n, args, ["str"])
+        return "None"
+    if name == "fs.temp_dir":
+        arguments(g, n, args, [])
+        return "str"
+    if name == "fs.same_file":
+        arguments(g, n, args, ["str", "str"])
+        return "bool"
+    if name == "fs.exists":
+        arguments(g, n, args, ["str"])
+        return "bool"
+    if name == "fs.copy_executable" or name == "fs.write_text":
+        arguments(g, n, args, ["str", "str"])
+        return "None"
+    if name == "len" or name == "str":
+        if len(args) != 1:
+            fail(n, name + " expects one argument")
+        ty = expression(g, args[0], "")
+        if name == "len":
+            if ty == "str" or list_type(ty):
+                return "int"
+        elif has(["str", "int", "bool"], ty):
+            return "str"
+        fail(n, name + " does not accept " + ty)
+    if name == "task.yield":
+        arguments(g, n, args, [])
+        return "None"
+    if name == "http.serve":
+        if len(args) != 3:
+            fail(n, "http.serve expects host, port, and a handler function")
+        host = expression(g, args[0], "str")
+        port = expression(g, args[1], "int")
+        expect(n, host, "str")
+        expect(n, port, "int")
+        handler = args[2].text
+        i = declaration(g.program, handler)
+        if args[2].kind != "name" or i < 0 or has(g.declared, handler) or position(g.bindings, handler) >= 0:
+            fail(n, "HTTP handler must be a named function")
+        fn_node = g.program.declarations[i]
+        if fn_node.kind != "fn" or fn_node.type_name != "str" or len(fn_node.types) != 1:
+            fail(n, "HTTP handler must have signature fn handler(target: str) -> str")
+        expect(n, fn_node.types[0], "str")
+        return "None"
+    if suffix(name, ".spawn"):
+        group = name[:len(name) - 6]
+        if not has(g.groups, group):
+            fail(n, "'" + group + "' is not an active task group")
+        if len(args) == 0 or args[0].kind != "name":
+            fail(n, "spawn expects a named worker function followed by its arguments")
+        worker = args[0].text
+        wi = declaration(g.program, worker)
+        if wi < 0 or has(g.declared, worker) or position(g.bindings, worker) >= 0:
+            fail(n, "unknown or shadowed worker function '" + worker + "'")
+        work = g.program.declarations[wi]
+        if work.kind != "fn" or work.type_name != "None":
+            fail(n, "task workers must return None")
+        actual: list[syntax.Node] = []
+        for i in range(1, len(args)):
+            actual.append(args[i])
+        for ty in work.types:
+            if list_type(ty) or (managed(ty) and ty != "str"):
+                fail(n, "mutable lists, records, and enums cannot cross task boundaries yet")
+        arguments(g, n, actual, work.types)
+        return "None"
+    return ""
+
+fn expression(g: Checker, n: syntax.Node, hint: str) -> str:
+    kind = n.kind
+    if kind == "int" or kind == "bool" or kind == "str":
+        return kind
+    if kind == "name":
+        bi = position(g.bindings, n.text)
+        if bi >= 0:
+            return g.bindings[bi].ty
+        if not has(g.assigned, n.text):
+            fail(n, "variable '" + n.text + "' is not definitely assigned")
+        return g.locals[position(g.locals, n.text)].ty
+    if kind == "list":
+        ty = ""
+        if list_type(hint):
+            ty = element(hint)
+        for item in n.children:
+            actual = expression(g, item, ty)
+            if actual == "None":
+                fail(n, "list elements must have a value")
+            if ty == "":
+                ty = actual
+            else:
+                expect(item, actual, ty)
+        if ty == "":
+            fail(n, "empty list needs a list[T] annotation or an expected list type")
+        return "list[" + ty + "]"
+    if kind == "index":
+        base = expression(g, n.children[0], "")
+        expect(n, expression(g, n.children[1], "int"), "int")
+        if base == "str":
+            return "str"
+        if list_type(base):
+            return element(base)
+        fail(n, "indexing requires a string or list")
+    if kind == "slice":
+        expect(n, expression(g, n.children[0], "str"), "str")
+        for i in range(1, 3):
+            if n.children[i].kind != "none":
+                expect(n, expression(g, n.children[i], "int"), "int")
+        return "str"
+    if kind == "field":
+        return field(g, n, expression(g, n.children[0], ""), n.text)
+    if kind == "method":
+        base = expression(g, n.children[0], "")
+        args: list[syntax.Node] = []
+        for i in range(1, len(n.children)):
+            args.append(n.children[i])
+        return method(g, n, base, n.text, args)
+    if kind == "call":
+        if has(g.declared, n.text) or position(g.bindings, n.text) >= 0:
+            fail(n, "variable '" + n.text + "' is not callable")
+        ty = construct(g, n)
+        if ty != "":
+            return ty
+        fi = declaration(g.program, n.text)
+        if fi < 0:
+            ty = builtin(g, n)
+            if ty != "":
+                return ty
+        if n.text == "print":
+            for arg in n.children:
+                if not has(["int", "str", "bool"], expression(g, arg, "")):
+                    fail(n, "print accepts int, str, or bool values")
+            return "None"
+        if fi < 0 or g.program.declarations[fi].kind != "fn":
+            fail(n, "unknown function '" + n.text + "'")
+        fn_node = g.program.declarations[fi]
+        arguments(g, n, n.children, fn_node.types)
+        return fn_node.type_name
+    if kind == "unary":
+        ty = expression(g, n.children[0], "")
+        if n.text == "not":
+            expect(n, ty, "bool")
+            return "bool"
+        expect(n, ty, "int")
+        return "int"
+    if kind == "binary":
+        op = n.text
+        left = expression(g, n.children[0], "")
+        if op == "and" or op == "or":
+            expect(n, left, "bool")
+            expect(n, expression(g, n.children[1], "bool"), "bool")
+            return "bool"
+        right = expression(g, n.children[1], "")
+        expect(n, right, left)
+        if not has(["int", "bool", "str"], left):
+            fail(n, "operator requires scalar values")
+        if op == "+" and left == "str":
+            return "str"
+        if has(["+", "-", "*", "//", "%"], op):
+            expect(n, left, "int")
+            return "int"
+        if op != "==" and op != "!=" and left != "str":
+            expect(n, left, "int")
+        return "bool"
+    fail(n, "unknown expression '" + kind + "'")
+    return "None"
+
+fn block(g: Checker, body: list[syntax.Node]) -> bool:
+    falls = True
+    for n in body:
+        if not falls:
+            fail(n, "unreachable statement")
+        falls = statement(g, n)
+    return falls
+
+fn for_loop(g: Checker, n: syntax.Node):
+    before = copy(g.assigned)
+    iterable = n.children[0]
+    if iterable.kind == "call" and iterable.text == "range":
+        if has(g.declared, "range") or position(g.bindings, "range") >= 0:
+            fail(n, "variable 'range' is not callable")
+        if len(iterable.children) == 0 or len(iterable.children) > 3:
+            fail(n, "range expects stop, start/stop, or start/stop/step")
+        for arg in iterable.children:
+            expect(n, expression(g, arg, "int"), "int")
+        bind(g, n, n.text, "int")
+    else:
+        ty = expression(g, iterable, "")
+        if list_type(ty):
+            bind(g, n, n.text, element(ty))
+        elif ty == "str":
+            bind(g, n, n.text, "str")
+        else:
+            fail(n, "for requires a list, string, or range")
+    g.loops = g.loops + 1
+    block(g, n.children[1].children)
+    g.loops = g.loops - 1
+    g.assigned = before
+
+fn match_statement(g: Checker, n: syntax.Node) -> bool:
+    ty = expression(g, n.children[0], "")
+    ti = declaration(g.program, ty)
+    if ti < 0 or g.program.declarations[ti].kind != "enum":
+        fail(n, "match requires an enum value")
+    variants = g.program.declarations[ti].children
+    seen: list[str] = []
+    wildcard = False
+    before = copy(g.assigned)
+    merged: list[str] = []
+    exits = 0
+    for ai in range(1, len(n.children)):
+        arm = n.children[ai]
+        if wildcard:
+            fail(arm, "unreachable case after wildcard")
+        g.assigned = copy(before)
+        previous_bindings = len(g.bindings)
+        if arm.text == "_":
+            if len(seen) == len(variants):
+                fail(arm, "unreachable wildcard; all variants already covered")
+            wildcard = True
+        else:
+            vi = -1
+            for i in range(len(variants)):
+                if ty + "." + variants[i].text == arm.text:
+                    vi = i
+            if vi < 0:
+                fail(arm, "'" + arm.text + "' is not a variant of " + ty)
+            if has(seen, arm.text):
+                fail(arm, "duplicate match case")
+            seen.append(arm.text)
+            variant = variants[vi]
+            if len(arm.names) != len(variant.types):
+                fail(arm, "pattern payload count does not match variant")
+            bound: list[str] = []
+            for i in range(len(arm.names)):
+                name = arm.names[i]
+                if name != "_":
+                    if has(bound, name) or namespace(name) or has(g.groups, name):
+                        fail(arm, "duplicate or reserved pattern binding '" + name + "'")
+                    bound.append(name)
+                    g.bindings.append(Binding(name, variant.types[i]))
+        if block(g, arm.children):
+            if exits == 0:
+                merged = copy(g.assigned)
+            else:
+                merged = intersect(merged, g.assigned)
+            exits = exits + 1
+        while len(g.bindings) > previous_bindings:
+            g.bindings.pop()
+    if len(n.children) < 2:
+        fail(n, "match must have cases")
+    if not wildcard and len(seen) != len(variants):
+        fail(n, "non-exhaustive match: handle every variant or add case _:")
+    if exits > 0:
+        g.assigned = merged
+    else:
+        g.assigned = before
+    return exits > 0
+
+fn statement(g: Checker, n: syntax.Node) -> bool:
+    kind = n.kind
+    if kind == "assign":
+        hint = n.type_name
+        li = position(g.locals, n.text)
+        if hint == "" and li >= 0:
+            hint = g.locals[li].ty
+        ty = expression(g, n.children[0], hint)
+        if ty == "None":
+            fail(n, "cannot assign a function with no return value")
+        if n.type_name != "":
+            validate(g.program, n, n.type_name)
+            expect(n, ty, n.type_name)
+        bind(g, n, n.text, ty)
+    elif kind == "set_field":
+        base = expression(g, n.children[0], "")
+        ty = field(g, n, base, n.text)
+        expect(n, expression(g, n.children[1], ty), ty)
+    elif kind == "set_index":
+        base = expression(g, n.children[0], "")
+        if not list_type(base):
+            fail(n, "indexed assignment requires a list; strings are immutable")
+        expect(n, expression(g, n.children[1], "int"), "int")
+        expect(n, expression(g, n.children[2], element(base)), element(base))
+    elif kind == "for":
+        for_loop(g, n)
+    elif kind == "match":
+        return match_statement(g, n)
+    elif kind == "assert":
+        expect(n, expression(g, n.children[0], "bool"), "bool")
+        if len(n.children) > 1:
+            expect(n, expression(g, n.children[1], "str"), "str")
+    elif kind == "expr":
+        expr = n.children[0]
+        if expr.kind != "call" and expr.kind != "method":
+            fail(n, "only function calls may be used as expression statements")
+        expression(g, expr, "")
+        if expr.kind == "call" and (expr.text == "panic" or expr.text == "sys.exit"):
+            return False
+    elif kind == "return":
+        ty = "None"
+        if len(n.children) > 0:
+            ty = expression(g, n.children[0], g.result)
+        expect(n, ty, g.result)
+        return False
+    elif kind == "if":
+        expect(n, expression(g, n.children[0], "bool"), "bool")
+        before = copy(g.assigned)
+        yes = block(g, n.children[1].children)
+        yes_assigned = copy(g.assigned)
+        g.assigned = before
+        no = block(g, n.children[2].children)
+        if yes and no:
+            g.assigned = intersect(yes_assigned, g.assigned)
+        elif yes:
+            g.assigned = yes_assigned
+        return yes or no
+    elif kind == "group":
+        declaration_index = declaration(g.program, n.text)
+        function_name = declaration_index >= 0 and g.program.declarations[declaration_index].kind == "fn"
+        if position(g.locals, n.text) >= 0 or function_name or has(g.groups, n.text) or position(g.bindings, n.text) >= 0 or reserved(n.text):
+            fail(n, "task group name '" + n.text + "' is already in use or reserved")
+        g.groups.append(n.text)
+        falls = block(g, n.children)
+        g.groups.pop()
+        return falls
+    elif kind == "while":
+        before = copy(g.assigned)
+        expect(n, expression(g, n.children[0], "bool"), "bool")
+        g.loops = g.loops + 1
+        block(g, n.children[1].children)
+        g.loops = g.loops - 1
+        g.assigned = before
+    elif kind == "break" or kind == "continue":
+        if g.loops == 0:
+            fail(n, "break/continue must be inside a loop")
+        return False
+    elif kind == "pass":
+        pass
+    else:
+        fail(n, "unknown statement '" + kind + "'")
+    return True
+
+fn function(p: syntax.Program, n: syntax.Node, internal: bool):
+    locals: list[Binding] = []
+    for i in range(len(n.names)):
+        locals.append(Binding(n.names[i], n.types[i]))
+    declared = copy(n.names)
+    collect_locals(n.children, declared)
+    g = Checker(p, locals, [], copy(n.names), declared, [], 0, n.type_name, internal)
+    if block(g, n.children) and n.type_name != "None":
+        fail(n, "function '" + n.text + "' must return " + n.type_name + " on every path")
+
+fn validate_program(program: syntax.Program, require_main: bool):
+    declarations(program, require_main)
+    for n in program.declarations:
+        if n.kind == "fn":
+            function(program, n, not require_main)
+
+fn check(program: syntax.Program):
+    validate_program(program, True)
+
+fn check_library(program: syntax.Program):
+    validate_program(program, False)

@@ -1,0 +1,2 @@
+# A tiny expression language compiled by a program written in Faz.
+(10 + 4) * 3

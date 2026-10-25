@@ -1,0 +1,5 @@
+struct Item:
+    value: int
+    value: str
+fn main():
+    pass

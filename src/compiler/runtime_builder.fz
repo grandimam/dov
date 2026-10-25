@@ -1,0 +1,103 @@
+# Developer maintenance: compile the Faz runtime and embed its LLVM output.
+import parser
+import llvm_emitter
+
+fn lines(text: str) -> list[str]:
+    result: list[str] = []
+    current: list[str] = []
+    for character in text:
+        if character == "\n":
+            result.append(str.join(current, ""))
+            current = []
+        else:
+            current.append(character)
+    if len(current) != 0:
+        result.append(str.join(current, ""))
+    return result
+
+fn starts(text: str, prefix: str) -> bool:
+    return len(text) >= len(prefix) and text[:len(prefix)] == prefix
+
+fn has(values: list[str], value: str) -> bool:
+    for index in range(len(values)):
+        if values[index] == value:
+            return True
+    return False
+
+fn symbol(line: str) -> str:
+    start = 0
+    for i in range(len(line)):
+        if line[i] == "@":
+            start = i + 1
+        elif line[i] == "(" and start != 0:
+            return line[start:i]
+    panic("invalid LLVM declaration in runtime: " + line)
+
+fn merge(first: str, second: str, third: str) -> str:
+    input = lines(str.join([first, second, third], ""))
+    definitions: list[str] = []
+    declarations: list[str] = []
+    result: list[str] = []
+    for line in input:
+        if starts(line, "define "):
+            definitions.append(symbol(line))
+    for line in input:
+        keep = True
+        if starts(line, "declare "):
+            name = symbol(line)
+            if has(definitions, name) or has(declarations, name):
+                keep = False
+            else:
+                declarations.append(name)
+        if starts(line, "@rt_globals = external"):
+            keep = False
+        if keep:
+            result.append(line + "\n")
+    return str.join(result, "")
+
+fn quote(text: str) -> str:
+    result: list[str] = ["\""]
+    for character in text:
+        if character == "\"":
+            result.append("\\\"")
+        elif character == "\\":
+            result.append("\\\\")
+        elif character == "\n":
+            result.append("\\n")
+        elif character == "\r":
+            result.append("\\r")
+        elif character == "\t":
+            result.append("\\t")
+        else:
+            result.append(character)
+    result.append("\"")
+    return str.join(result, "")
+
+fn chunks(text: str) -> str:
+    result: list[str] = []
+    current: list[str] = []
+    for character in text:
+        current.append(character)
+        if len(current) == 2048:
+            result.append("            " + quote(str.join(current, "")) + ",\n")
+            current = []
+    if len(current) != 0:
+        result.append("            " + quote(str.join(current, "")) + ",\n")
+    return str.join(result, "")
+
+fn embed(directory: str) -> str:
+    sources: list[str] = []
+    for name in ["runtime/startup", "runtime/memory", "runtime/values", "runtime/strings", "runtime/tasks", "std/io", "std/text", "std/fs", "std/process", "std/net", "std/http"]:
+        sources.append(fs.read_text(directory + "/" + name + ".fz") + "\n")
+    program = parser.parse(str.join(sources, ""), directory + "/runtime.fz")
+    generated = llvm_emitter.emit_library(program)
+    common = fs.read_text(directory + "/runtime/platform/native_common.ll")
+    output: list[str] = ["# Generated from the Faz runtime and LLVM OS boundary.\nfn source(platform: str) -> str:\n"]
+    for platform in ["darwin", "linux"]:
+        boundary = fs.read_text(directory + "/runtime/platform/native_" + platform + ".ll")
+        runtime = merge(generated, common, boundary)
+        output.append("    if platform == \"" + platform + "\":\n        return str.join([\n")
+        output.append(chunks(runtime))
+        output.append("        ], \"\")\n")
+    output.append("    panic(\"unsupported platform: \" + platform)\n")
+    return str.join(output, "")

@@ -1,0 +1,4 @@
+fn value(n: int):
+    pass
+fn main():
+    value(True)

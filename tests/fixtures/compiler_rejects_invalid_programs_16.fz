@@ -1,0 +1,2 @@
+fn main():
+    main(1)

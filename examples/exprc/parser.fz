@@ -1,0 +1,68 @@
+import syntax
+
+struct Cursor:
+    tokens: list[syntax.Token]
+    position: int
+
+fn peek(cursor: Cursor) -> syntax.Token:
+    return cursor.tokens[cursor.position]
+
+fn advance(cursor: Cursor) -> syntax.Token:
+    token = peek(cursor)
+    cursor.position = cursor.position + 1
+    return token
+
+fn primary(cursor: Cursor) -> syntax.Expr:
+    token = advance(cursor)
+    match token.kind:
+        case syntax.TokenKind.Number(value):
+            return syntax.Expr.Number(value)
+        case syntax.TokenKind.Minus():
+            return syntax.Expr.Negate(primary(cursor))
+        case syntax.TokenKind.Left():
+            value = expression(cursor)
+            close = advance(cursor)
+            match close.kind:
+                case syntax.TokenKind.Right():
+                    return value
+                case _:
+                    panic("expected ')' at offset " + str(close.offset))
+        case _:
+            panic("expected a number or '(' at offset " + str(token.offset))
+
+fn product(cursor: Cursor) -> syntax.Expr:
+    result = primary(cursor)
+    scanning = True
+    while scanning:
+        match peek(cursor).kind:
+            case syntax.TokenKind.Star():
+                advance(cursor)
+                result = syntax.Expr.Multiply(result, primary(cursor))
+            case _:
+                scanning = False
+    return result
+
+fn expression(cursor: Cursor) -> syntax.Expr:
+    result = product(cursor)
+    scanning = True
+    while scanning:
+        match peek(cursor).kind:
+            case syntax.TokenKind.Plus():
+                advance(cursor)
+                result = syntax.Expr.Add(result, product(cursor))
+            case syntax.TokenKind.Minus():
+                advance(cursor)
+                result = syntax.Expr.Subtract(result, product(cursor))
+            case _:
+                scanning = False
+    return result
+
+fn parse(tokens: list[syntax.Token]) -> syntax.Expr:
+    cursor = Cursor(tokens, 0)
+    result = expression(cursor)
+    last = peek(cursor)
+    match last.kind:
+        case syntax.TokenKind.End():
+            return result
+        case _:
+            panic("unexpected token at offset " + str(last.offset))

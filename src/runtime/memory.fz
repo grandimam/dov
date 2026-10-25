@@ -1,0 +1,191 @@
+# Managed heap and precise tracing GC. Addresses are opaque integer handles.
+# Header words: next, mark-work link, hash link, payload bytes, kind, marked.
+# Kinds: 0 bytes, 1 list, 2 object. Only declared reference slots are traced.
+
+fn rt_alloc(size: int) -> int:
+    result = raw.alloc(size)
+    if result == 0:
+        rt_panic(0, raw.address("out of memory"))
+    return result
+
+# Managed values and precise tracing GC. All addresses are opaque integer handles.
+# Header words: next, mark-work link, hash link, payload bytes, kind, marked.
+# Kinds: 0 bytes, 1 list, 2 object. Only declared reference slots are traced.
+
+fn rt_roots_enter(slots: int, count: int) -> int:
+    frame = rt_alloc(24)
+    raw.store(frame, raw.global(1))
+    raw.store(frame + 8, count)
+    raw.store(frame + 16, slots)
+    raw.set_global(1, frame)
+    return frame
+
+fn rt_roots_leave(frame: int) -> int:
+    raw.set_global(1, raw.load(frame))
+    raw.free(frame)
+    return 0
+
+# Runtime helper roots own their value-slot array; compiler frames do not.
+fn rt_keep(a: int, b: int, c: int) -> int:
+    slots = rt_alloc(24)
+    raw.store(slots, a)
+    raw.store(slots + 8, b)
+    raw.store(slots + 16, c)
+    return rt_roots_enter(slots, 3)
+
+fn rt_release(frame: int) -> int:
+    raw.free(raw.load(frame + 16))
+    return rt_roots_leave(frame)
+
+fn rt_bucket(pointer: int, capacity: int) -> int:
+    return (pointer // 16) % capacity
+
+fn rt_index_reserve() -> int:
+    capacity = raw.global(13)
+    if capacity != 0 and raw.global(14) < capacity // 2:
+        return 0
+    if capacity == 0:
+        capacity = 1024
+    else:
+        capacity = capacity * 2
+    index = rt_alloc(capacity * 8)
+    block = raw.global(0)
+    while block != 0:
+        slot = index + rt_bucket(block + 48, capacity) * 8
+        raw.store(block + 16, raw.load(slot))
+        raw.store(slot, block)
+        block = raw.load(block)
+    raw.free(raw.global(12))
+    raw.set_global(12, index)
+    raw.set_global(13, capacity)
+    return 0
+
+fn rt_mark(pointer: int) -> int:
+    capacity = raw.global(13)
+    if pointer == 0 or capacity == 0:
+        return 0
+    block = raw.load(raw.global(12) + rt_bucket(pointer, capacity) * 8)
+    while block != 0:
+        if block + 48 == pointer:
+            if raw.load(block + 40) == 0:
+                raw.store(block + 40, 1)
+                raw.store(block + 8, raw.global(2))
+                raw.set_global(2, block)
+            return 0
+        block = raw.load(block + 16)
+    return 0
+
+fn rt_mark_roots(frame: int) -> int:
+    current = frame
+    while current != 0:
+        slots = raw.load(current + 16)
+        count = raw.load(current + 8)
+        i = 0
+        while i < count:
+            rt_mark(raw.load(slots + i * 8))
+            i = i + 1
+        current = raw.load(current)
+    return 0
+
+fn rt_collect() -> int:
+    start = raw.call("rt_os_nanoseconds")
+    raw.set_global(8, raw.global(8) + 1)
+    rt_mark_roots(raw.global(1))
+    rt_task_roots()
+    while raw.global(2) != 0:
+        block = raw.global(2)
+        raw.set_global(2, raw.load(block + 8))
+        value = block + 48
+        kind = raw.load(block + 32)
+        if kind == 1:
+            items = raw.load(value + 16)
+            rt_mark(items)
+            if raw.load(value + 24) != 0:
+                i = 0
+                while i < raw.load(value):
+                    rt_mark(raw.load(items + i * 8))
+                    i = i + 1
+        if kind == 2:
+            i = 0
+            while i < raw.load(value + 8):
+                if raw.byte(raw.load(value + 16) + i) == 49:
+                    rt_mark(raw.load(value + 24 + i * 8))
+                i = i + 1
+    previous = 0
+    block = raw.global(0)
+    while block != 0:
+        next = raw.load(block)
+        if raw.load(block + 40) != 0:
+            raw.store(block + 40, 0)
+            previous = block
+        else:
+            if previous == 0:
+                raw.set_global(0, next)
+            else:
+                raw.store(previous, next)
+            bucket = raw.global(12) + rt_bucket(block + 48, raw.global(13)) * 8
+            while raw.load(bucket) != block:
+                bucket = raw.load(bucket) + 16
+            raw.store(bucket, raw.load(block + 16))
+            size = raw.load(block + 24)
+            raw.set_global(3, raw.global(3) - size)
+            raw.set_global(6, raw.global(6) + size)
+            raw.set_global(14, raw.global(14) - 1)
+            raw.free(block)
+        block = next
+    elapsed = raw.call("rt_os_nanoseconds") - start
+    raw.set_global(15, raw.global(15) + elapsed)
+    if elapsed > raw.global(16):
+        raw.set_global(16, elapsed)
+    raw.set_global(9, raw.global(3) * 2 + 1048576)
+    return 0
+
+fn rt_heap(size: int, kind: int, line: int) -> int:
+    if size < 0 or size > 9223372036854775759:
+        rt_panic(line, raw.address("allocation too large"))
+    if raw.global(11) == 0:
+        raw.set_global(11, 1)
+        raw.set_global(9, 1048576)
+        stress = raw.call("rt_os_getenv", raw.address("FAZ_GC_STRESS"))
+        if stress != 0 and raw.byte(stress) != 0:
+            if rt_string_compare(stress, raw.address("0")) != 0:
+                raw.set_global(10, 1)
+    if raw.global(10) != 0 or raw.global(3) + size > raw.global(9):
+        rt_collect()
+    rt_index_reserve()
+    block = rt_alloc(size + 48)
+    if block == 0:
+        rt_panic(line, raw.address("out of memory"))
+    raw.store(block, raw.global(0))
+    raw.store(block + 24, size)
+    raw.store(block + 32, kind)
+    raw.set_global(0, block)
+    bucket = raw.global(12) + rt_bucket(block + 48, raw.global(13)) * 8
+    raw.store(block + 16, raw.load(bucket))
+    raw.store(bucket, block)
+    raw.set_global(14, raw.global(14) + 1)
+    raw.set_global(3, raw.global(3) + size)
+    raw.set_global(5, raw.global(5) + size)
+    raw.set_global(7, raw.global(7) + 1)
+    if raw.global(3) > raw.global(4):
+        raw.set_global(4, raw.global(3))
+    return block + 48
+
+fn rt_heap_free() -> int:
+    rt_collect()
+    stats = raw.call("rt_os_getenv", raw.address("FAZ_GC_STATS"))
+    if stats != 0 and raw.byte(stats) != 0:
+        if rt_string_compare(stats, raw.address("0")) != 0:
+            raw.call("rt_os_gc_stats", raw.global(7), raw.global(8), raw.global(5), raw.global(6), raw.global(3), raw.global(4), raw.global(15), raw.global(16))
+    block = raw.global(0)
+    while block != 0:
+        next = raw.load(block)
+        raw.free(block)
+        block = next
+    raw.free(raw.global(12))
+    raw.set_global(0, 0)
+    raw.set_global(12, 0)
+    raw.set_global(13, 0)
+    raw.set_global(14, 0)
+    return 0
+

@@ -1,0 +1,253 @@
+# Arguments, environment, working directory, and child process control.
+
+fn rt_arguments(line: int) -> int:
+    args = rt_list_new(1, line)
+    frame = rt_keep(args, 0, 0)
+    i = 1
+    while i < raw.global(25):
+        value = raw.load(raw.global(26) + i * 8)
+        rt_string_len(value, line)
+        rt_list_append(args, value, line)
+        i = i + 1
+    rt_release(frame)
+    return args
+
+fn rt_environment(name: int, line: int) -> int:
+    value = raw.call("rt_os_getenv", name)
+    if value == 0:
+        value = raw.address("")
+    result = rt_copy_string(value, line)
+    rt_string_len(result, line)
+    return result
+
+fn rt_process_run(executable: int, arguments: int, line: int) -> int:
+    count = raw.load(arguments)
+    argv = rt_alloc((count + 2) * 8)
+    raw.store(argv, executable)
+    i = 0
+    while i < count:
+        raw.store(argv + (i + 1) * 8, rt_list_get(arguments, i, line))
+        i = i + 1
+    process = rt_alloc(8)
+    error = raw.call("rt_os_spawn", process, executable, argv)
+    raw.free(argv)
+    if error != 0:
+        raw.free(process)
+        if error == 2:
+            return -1
+        return -2
+    pid = rt_load32(process)
+    raw.free(process)
+    status = rt_alloc(8)
+    while raw.call("rt_os_waitpid", pid, status, 0) < 0:
+        if raw.call("rt_os_errno") != 4:
+            raw.free(status)
+            return -2
+    value = rt_load32(status)
+    raw.free(status)
+    signal = value % 128
+    if signal == 0:
+        return (value // 256) % 256
+    if signal != 127:
+        return 128 + signal
+    return -2
+
+fn rt_process_exit(code: int, line: int) -> int:
+    if code < 0 or code > 255:
+        rt_panic(line, raw.address("exit status must be between 0 and 255"))
+    raw.call("rt_os_exit", code)
+    return 0
+
+fn rt_launch(executable: int, arguments: int, actions: int, line: int) -> int:
+    count = raw.load(arguments)
+    argv = rt_alloc((count + 2) * 8)
+    raw.store(argv, executable)
+    i = 0
+    while i < count:
+        raw.store(argv + (i + 1) * 8, rt_list_get(arguments, i, line))
+        i = i + 1
+    process = rt_alloc(8)
+    attributes = rt_alloc(512)
+    error = raw.call("rt_os_attributes_init", attributes)
+    if error == 0:
+        error = raw.call("rt_os_attributes_group", attributes)
+        if error == 0:
+            error = raw.call("rt_os_spawn_actions", process, executable, argv, actions, attributes)
+        raw.call("rt_os_attributes_destroy", attributes)
+    raw.free(attributes)
+    raw.free(argv)
+    pid = rt_load32(process)
+    raw.free(process)
+    if error != 0:
+        if error == 2:
+            return -1
+        return -2
+    return pid
+
+fn rt_process_start(executable: int, arguments: int, line: int) -> int:
+    return rt_launch(executable, arguments, 0, line)
+
+fn rt_wait_status(value: int) -> int:
+    signal = value % 128
+    if signal == 0:
+        return (value // 256) % 256
+    if signal != 127:
+        return 128 + signal
+    return -2
+
+fn rt_process_wait(pid: int, line: int) -> int:
+    if pid <= 0 or pid > 2147483647:
+        rt_panic(line, raw.address("process id must be positive"))
+    status = rt_alloc(8)
+    while raw.call("rt_os_waitpid", pid, status, 0) < 0:
+        if raw.call("rt_os_errno") != 4:
+            raw.free(status)
+            return -2
+    result = rt_wait_status(rt_load32(status))
+    raw.free(status)
+    return result
+
+fn rt_process_kill(pid: int, line: int) -> int:
+    # kill(-1, ...) targets every permitted process, not a group numbered one.
+    if pid <= 1 or pid > 2147483647:
+        rt_panic(line, raw.address("process id must be greater than one"))
+    # sys.start establishes this group. Kill descendants too; reap with sys.wait.
+    if raw.call("rt_os_kill", -pid, 9) != 0:
+        raw.call("rt_os_kill", pid, 9)
+    return 0
+
+fn rt_capture_text(file: int, line: int) -> int:
+    size = raw.call("rt_os_file_position", file)
+    if size < 0 or raw.call("rt_os_seek_start", file) != 0:
+        rt_panic(line, raw.address("cannot rewind captured process output"))
+    result = rt_heap(size + 1, 0, line)
+    count = raw.call("rt_os_fread", result, 1, size, file)
+    if count != size:
+        rt_panic(line, raw.address("cannot read captured process output"))
+    i = 0
+    while i < size:
+        if raw.byte(result + i) == 0:
+            rt_panic(line, raw.address("captured output contains NUL; binary capture is not supported"))
+        i = i + 1
+    rt_string_len(result, line)
+    return result
+
+fn rt_process_capture(executable: int, arguments: int, timeout_ms: int, line: int) -> int:
+    if timeout_ms < 0:
+        rt_panic(line, raw.address("process timeout must be nonnegative"))
+    output = raw.call("rt_os_tmpfile")
+    errors = raw.call("rt_os_tmpfile")
+    if output == 0 or errors == 0:
+        if output != 0:
+            raw.call("rt_os_fclose", output)
+        if errors != 0:
+            raw.call("rt_os_fclose", errors)
+        rt_panic(line, raw.address("cannot create process capture files"))
+    outfd = raw.call("rt_os_fileno", output)
+    errfd = raw.call("rt_os_fileno", errors)
+    actions = rt_alloc(512)
+    error = raw.call("rt_os_actions_init", actions)
+    initialized = error == 0
+    if error == 0:
+        error = raw.call("rt_os_cloexec", outfd)
+    if error == 0:
+        error = raw.call("rt_os_cloexec", errfd)
+    if error == 0:
+        error = raw.call("rt_os_actions_dup2", actions, outfd, 1)
+    if error == 0:
+        error = raw.call("rt_os_actions_dup2", actions, errfd, 2)
+    pid = -2
+    if error == 0:
+        pid = rt_launch(executable, arguments, actions, line)
+    if initialized:
+        raw.call("rt_os_actions_destroy", actions)
+    raw.free(actions)
+    result_status = pid
+    if pid > 0:
+        status = rt_alloc(8)
+        start = rt_now()
+        while True:
+            completed = raw.call("rt_os_waitpid", pid, status, 1)
+            if completed == pid:
+                result_status = rt_wait_status(rt_load32(status))
+                break
+            if completed < 0 and raw.call("rt_os_errno") != 4:
+                rt_process_kill(pid, line)
+                rt_process_wait(pid, line)
+                result_status = -2
+                break
+            if timeout_ms > 0 and rt_now() - start >= timeout_ms:
+                rt_process_kill(pid, line)
+                rt_process_wait(pid, line)
+                result_status = 124
+                break
+            raw.call("rt_os_pause_poll")
+        raw.free(status)
+    result = rt_list_new(1, line)
+    frame = rt_keep(result, 0, 0)
+    rt_list_append(result, rt_int_string(result_status, line), line)
+    rt_list_append(result, rt_capture_text(output, line), line)
+    rt_list_append(result, rt_capture_text(errors, line), line)
+    raw.call("rt_os_fclose", output)
+    raw.call("rt_os_fclose", errors)
+    rt_release(frame)
+    return result
+
+fn rt_set_environment(name: int, value: int, line: int) -> int:
+    if raw.call("rt_os_setenv", name, value) != 0:
+        rt_panic(line, raw.address("cannot set environment variable"))
+    return 0
+
+fn rt_executable(line: int) -> int:
+    if raw.global(25) < 1:
+        return rt_copy_string(raw.address(""), line)
+    name = raw.load(raw.global(26))
+    if raw.call("rt_os_strchr", name, 47) != 0:
+        resolved = raw.call("rt_os_realpath", name, 0)
+        if resolved != 0:
+            result = rt_copy_string(resolved, line)
+            raw.free(resolved)
+            return result
+        return rt_copy_string(name, line)
+    path = raw.call("rt_os_getenv", raw.address("PATH"))
+    if path == 0:
+        path = raw.address("/usr/bin:/bin")
+    start = 0
+    length = rt_size(path)
+    name_size = rt_size(name)
+    while start <= length:
+        end = start
+        while end < length and raw.byte(path + end) != 58:
+            end = end + 1
+        size = end - start
+        candidate = rt_alloc(size + name_size + 2)
+        if size > 0:
+            raw.copy(candidate, path + start, size)
+            raw.set_byte(candidate + size, 47)
+            size = size + 1
+        raw.copy(candidate + size, name, name_size + 1)
+        if raw.call("rt_os_executable_access", candidate) == 0:
+            resolved = raw.call("rt_os_realpath", candidate, 0)
+            raw.free(candidate)
+            if resolved != 0:
+                result = rt_copy_string(resolved, line)
+                raw.free(resolved)
+                return result
+        else:
+            raw.free(candidate)
+        start = end + 1
+    return rt_copy_string(name, line)
+
+fn rt_current_directory(line: int) -> int:
+    native = raw.call("rt_os_getcwd")
+    if native == 0:
+        rt_panic(line, raw.address("cannot read current working directory"))
+    result = rt_copy_string(native, line)
+    raw.free(native)
+    rt_string_len(result, line)
+    return result
+
+fn rt_change_directory(path: int, line: int) -> int:
+    if raw.call("rt_os_chdir", path) != 0:
+        rt_file_error(raw.address("change directory to"), path, line)
+    return 0

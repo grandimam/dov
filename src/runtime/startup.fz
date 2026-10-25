@@ -1,0 +1,32 @@
+# Runtime initialization, diagnostics, and platform word access.
+
+fn rt_panic(line: int, message: int) -> int:
+    raw.call("rt_os_panic", line, message)
+    return 0
+
+fn rt_init(argc: int, argv: int) -> int:
+    raw.set_global(25, argc)
+    raw.set_global(26, argv)
+    return 0
+
+fn rt_load16(pointer: int) -> int:
+    return raw.byte(pointer) + raw.byte(pointer + 1) * 256
+
+fn rt_load32(pointer: int) -> int:
+    return rt_load16(pointer) + rt_load16(pointer + 2) * 65536
+
+fn rt_store16(pointer: int, value: int) -> int:
+    raw.set_byte(pointer, value % 256)
+    raw.set_byte(pointer + 1, (value // 256) % 256)
+    return 0
+
+fn rt_store32(pointer: int, value: int) -> int:
+    rt_store16(pointer, value % 65536)
+    rt_store16(pointer + 2, (value // 65536) % 65536)
+    return 0
+
+fn rt_platform() -> int:
+    return raw.call("rt_os_platform")
+
+# Process tools use private temporary files, avoiding pipe deadlock for arbitrary
+# output sizes. Captured children have their own process group for timeout cleanup.

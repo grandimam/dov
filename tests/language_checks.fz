@@ -1,0 +1,96 @@
+import support
+import cases
+
+fn fixtures(s: support.Suite):
+    for fixture in cases.all():
+        code = fs.read_text(s.root + "/tests/fixtures/" + fixture.file)
+        if fixture.kind == "reject":
+            if support.contains(fixture.file, "declaration_diagnostics"):
+                directory = support.fresh()
+                fs.write_text(directory + "/helper.fz", code)
+                fs.write_text(directory + "/main.fz", "import helper\nfn main():\n    pass\n")
+                result = support.capture(s.compiler, ["check", directory + "/main.fz"])
+                support.check(s, result.status != 0 and support.contains(result.err, fixture.expected) and support.contains(result.err, "helper.fz:"), fixture.file, result.err)
+                fs.remove_temp(directory)
+            else:
+                support.reject(s, code, fixture.expected)
+        elif fixture.kind == "gc":
+            directory = support.fresh()
+            binary = support.source(s, directory, code)
+            sys.set_env("FAZ_GC_STRESS", "1")
+            sys.set_env("FAZ_GC_STATS", "1")
+            result = support.capture(binary, [])
+            sys.set_env("FAZ_GC_STRESS", "0")
+            sys.set_env("FAZ_GC_STATS", "0")
+            support.success(s, result, fixture.expected, fixture.file)
+            live = support.stat_value(result.err, "live")
+            allocated = support.stat_value(result.err, "allocated")
+            reclaimed = support.stat_value(result.err, "reclaimed")
+            support.check(s, live == 0 and allocated > 0 and allocated == reclaimed, "GC reclaims every allocation", result.err)
+            if support.contains(fixture.file, "cycles_and_discarded"):
+                peak = support.stat_value(result.err, "peak")
+                collections = support.stat_value(result.err, "collections")
+                support.check(s, allocated > peak * 30 and collections > 1000, "cyclic GC keeps heap bounded", result.err)
+            fs.remove_temp(directory)
+        elif fixture.kind == "run":
+            support.run_source(s, code, fixture.expected)
+
+fn arithmetic(s: support.Suite):
+    expressions = ["1 // 0", "1 % 0", "9223372036854775807 + 1", "(-9223372036854775807 - 1) - 1", "9223372036854775807 * 2", "-(-9223372036854775807 - 1)", "(-9223372036854775807 - 1) // -1"]
+    for i in range(len(expressions)):
+        message = "integer overflow"
+        if i < 2:
+            message = "division by zero"
+        result = support.runtime_failure(s, "fn main():\n    print(" + expressions[i] + ")\n", message)
+        support.check(s, result.status == 1 and support.contains(result.err, "line 2"), "checked arithmetic location", result.err)
+    for statement in ["print([1][1])", "print([1][-2])", "print(\"a\"[1])", "print(\"a\"[-2])", "print(\"abc\"[2:1])", "print(\"abc\"[:4])", "items: list[int] = []\n    items.pop()", "items = [1]\n    items[2] = 3"]:
+        result = support.runtime_failure(s, "fn main():\n    " + statement + "\n", "Faz runtime error")
+        support.check(s, result.status == 1, "collection failure exit", result.err)
+    support.runtime_failure(s, "fn fail() -> int:\n    panic(\"bad input\")\nfn main():\n    print(fail())\n", "bad input")
+    support.runtime_failure(s, "fn main():\n    assert False, \"expected failure\"\n", "expected failure")
+    support.runtime_failure(s, "fn main():\n    for i in range(0, 0, 0):\n        pass\n", "step must not be zero")
+    support.run_source(s, "fn message() -> str:\n    panic(\"should not run\")\nfn main():\n    assert True, message()\n    print(\"ok\")\n", "ok\n")
+
+fn rejection(s: support.Suite):
+    for code in ["fn main():\n    range = 1\n    for i in range(2):\n        pass\n", "fn main():\n    for i in range(2):\n        pass\n    range = 1\n", "fn worker(range: int):\n    for i in range(2):\n        pass\nfn main():\n    pass\n", "enum Value:\n    Number(n: int)\nfn main():\n    match Value.Number(1):\n        case Value.Number(range):\n            for i in range(2):\n                pass\n"]:
+        support.reject(s, code, "variable 'range' is not callable")
+    for body in ["    Choice = 1\n    item = Choice.Item()\n", "    item = Choice.Item()\n    Choice = 1\n", "    match Choice.Item():\n        case Choice.Item():\n            Choice = 1\n"]:
+        support.reject(s, "enum Choice:\n    Item\nfn main():\n" + body, "variable 'Choice' is not callable")
+    for body in ["match x:\n        case Value.Unit:\n            pass", "match x:\n        case Value.Pair(a.b):\n            pass", "for in range(3):\n        pass", "(1 + 2) = 3", "values[:] = []", "if True:\n    pass", "1()", "return else", "x = []\n    x[::]"]:
+        support.reject(s, "fn main():\n    " + body + "\n", "")
+    for number in ["9223372036854775808", "-9223372036854775809", "18446744073709551616"]:
+        support.reject(s, "fn main():\n    value = " + number + "\n", "signed 64-bit range")
+    codes = ["fn main():\n    print([1)\n", "fn main():\n    print(\n        [1, 2]\n", "fn main():\n    ]\n"]
+    locations = [":2:13:", ":2:10:", ":2:5:"]
+    for i in range(len(codes)):
+        result = support.reject(s, codes[i], "delimiter")
+        support.check(s, support.contains(result.err, locations[i]), "delimiter location", result.err)
+
+fn conformance(s: support.Suite):
+    directory = support.fresh()
+    # An already canonical absolute path also exercises Linux's usual /tmp
+    # behavior on platforms where the temporary directory is a symlink.
+    filename = fs.canonical(directory) + "/result.txt"
+    for name in ["language", "modules"]:
+        binary = directory + "/" + name
+        path = s.root + "/tests/conformance/" + name
+        support.build(s, path + ".fz", binary)
+        sys.set_env("FAZ_GC_STRESS", "1")
+        result = support.capture(binary, [filename])
+        sys.set_env("FAZ_GC_STRESS", "0")
+        support.success(s, result, fs.read_text(path + ".stdout"), "shared conformance " + name)
+    invalid = s.root + "/tests/conformance/invalid"
+    count = 0
+    for name in fs.entries(invalid):
+        if support.ends(name, ".fz"):
+            count = count + 1
+            result = support.capture(s.compiler, ["check", invalid + "/" + name])
+            support.check(s, result.status != 0 and support.contains(result.err, name), "invalid conformance " + name, result.err)
+    support.check(s, count >= 30, "full invalid conformance corpus", str(count))
+    fs.remove_temp(directory)
+
+fn run(s: support.Suite):
+    fixtures(s)
+    arithmetic(s)
+    rejection(s)
+    conformance(s)

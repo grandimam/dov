@@ -1,0 +1,16 @@
+fn flag() -> bool:
+    print("flag")
+    return True
+
+fn mark(n: int) -> int:
+    print(n)
+    return n
+
+fn sub(a: int, b: int) -> int:
+    return a - b
+
+fn main():
+    print(False and flag(), True or flag())
+    print(True and flag(), False or flag())
+    print(sub(mark(5), mark(2)))
+    print(not 1 == 2 and True)

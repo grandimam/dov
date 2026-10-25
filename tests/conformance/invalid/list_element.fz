@@ -1,0 +1,2 @@
+fn main():
+    value = [1, "text"]

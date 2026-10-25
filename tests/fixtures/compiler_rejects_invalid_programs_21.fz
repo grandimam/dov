@@ -1,0 +1,4 @@
+fn main():
+    if True:
+        x = 1
+    print(x)

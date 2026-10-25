@@ -1,0 +1,5 @@
+struct A:
+    x: int
+fn main():
+    a = A(1)
+    a.x = "bad"

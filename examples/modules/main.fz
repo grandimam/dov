@@ -1,0 +1,5 @@
+# Imports resolve relative to this file: greetings.fz is beside main.fz.
+import greetings
+
+fn main():
+    print(greetings.hello("Faz"))

@@ -1,0 +1,21 @@
+enum Flag:
+    Continue
+    Stop
+
+fn worker(i: int):
+    task.yield()
+    print(i)
+
+fn main():
+    for i in range(4):
+        with task.group() as group:
+            group.spawn(worker, i)
+            action = Flag.Continue()
+            if i == 2:
+                action = Flag.Stop()
+            match action:
+                case Flag.Continue():
+                    continue
+                case Flag.Stop():
+                    break
+    print("done")

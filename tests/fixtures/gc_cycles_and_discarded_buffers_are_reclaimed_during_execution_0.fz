@@ -1,0 +1,14 @@
+struct Node:
+    text: str
+    children: list[Node]
+fn garbage(n: int):
+    root = Node(str(n), [])
+    root.children.append(root)
+    for i in range(100):
+        root.children.append(Node(str(i), []))
+    for i in range(100):
+        root.children.pop()
+fn main():
+    for n in range(200):
+        garbage(n)
+    print("collected")

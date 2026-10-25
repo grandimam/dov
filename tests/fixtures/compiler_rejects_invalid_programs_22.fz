@@ -1,0 +1,4 @@
+fn main():
+    while False:
+        x = 1
+    print(x)

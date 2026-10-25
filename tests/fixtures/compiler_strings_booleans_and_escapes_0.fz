@@ -1,0 +1,10 @@
+fn identity(text: str) -> str:
+    return text
+
+fn main():
+    text: str = "100% café — سلام"
+    print(identity(text), True, False)
+    print("same" == identity("same"), "a" != "b")
+    print("quote: \" slash: \\")
+    print("a\tb\nc")
+    print()

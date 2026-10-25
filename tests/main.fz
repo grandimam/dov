@@ -1,0 +1,36 @@
+# Entire conformance harness runs as one ordinary native Faz program.
+import support
+import language_checks
+import module_checks
+import cli_checks
+import native_checks
+import bootstrap_checks
+import llvm_checks
+import concurrency_checks
+
+fn main():
+    args = sys.args()
+    assert len(args) == 2, "usage: faz-tests <compiler> <repository>"
+    suite = support.Suite(fs.canonical(args[0]), fs.canonical(args[1]), 0, 0)
+    original = sys.cwd()
+    working = fs.temp_dir()
+    sys.chdir(working)
+    print("Language and GC")
+    language_checks.run(suite)
+    print("Modules")
+    module_checks.run(suite)
+    print("CLI and text I/O")
+    cli_checks.run(suite)
+    print("Native process and filesystem safety")
+    native_checks.run(suite)
+    print("Educational compilers and frontend")
+    bootstrap_checks.run(suite)
+    print("LLVM backend")
+    llvm_checks.run(suite)
+    print("Concurrency and HTTP")
+    concurrency_checks.run(suite)
+    print("Checks:", suite.checks, "Failures:", suite.failed)
+    sys.chdir(original)
+    fs.remove_temp(working)
+    if suite.failed != 0:
+        sys.exit(1)

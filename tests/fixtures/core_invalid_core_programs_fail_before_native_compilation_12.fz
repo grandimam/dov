@@ -1,0 +1,6 @@
+enum A:
+    X(n: int)
+fn main():
+    match A.X(1):
+        case A.X(n):
+            n = 2

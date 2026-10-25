@@ -1,0 +1,4 @@
+fn value():
+    pass
+fn main():
+    x = value()

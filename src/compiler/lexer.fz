@@ -1,0 +1,152 @@
+import syntax
+
+struct State:
+    tokens: list[syntax.Token]
+    indents: list[int]
+    groups: list[syntax.Token]
+    source: str
+
+fn fail(state: State, line: int, column: int, message: str):
+    panic(state.source + ":" + str(line) + ":" + str(column) + ": " + message)
+
+fn digit(c: str) -> bool:
+    return c >= "0" and c <= "9"
+
+fn letter(c: str) -> bool:
+    return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+fn symbol(c: str) -> bool:
+    for candidate in "[].():,+-*%=<>":
+        if c == candidate:
+            return True
+    return False
+
+fn normalized_integer(text: str) -> str:
+    i = 0
+    while i < len(text) - 1 and text[i] == "0":
+        i = i + 1
+    return text[i:]
+
+fn line_tokens(state: State, chars: list[str], line: int):
+    n = len(chars)
+    pos = 0
+    while pos < n and chars[pos] == " ":
+        pos = pos + 1
+    if pos < n and chars[pos] == "\t":
+        fail(state, line, pos + 1, "use spaces, not tabs, for indentation")
+    if pos == n or chars[pos] == "#":
+        return
+    indent = pos
+    if len(state.groups) == 0:
+        if indent > state.indents[-1]:
+            state.indents.append(indent)
+            state.tokens.append(syntax.Token("indent", "", line, 1))
+        else:
+            while indent < state.indents[-1]:
+                state.indents.pop()
+                state.tokens.append(syntax.Token("dedent", "", line, 1))
+            if indent != state.indents[-1]:
+                fail(state, line, 1, "indentation does not match an outer block")
+    while pos < n:
+        start = pos
+        c = chars[pos]
+        if c == " " or c == "\r":
+            pos = pos + 1
+            continue
+        if c == "#":
+            break
+        kind = "symbol"
+        value = ""
+        if letter(c):
+            kind = "name"
+            while pos < n and (letter(chars[pos]) or digit(chars[pos])):
+                value = value + chars[pos]
+                pos = pos + 1
+        elif digit(c):
+            kind = "int"
+            while pos < n and digit(chars[pos]):
+                value = value + chars[pos]
+                pos = pos + 1
+            value = normalized_integer(value)
+            if len(value) > 20 or (len(value) == 20 and value > "18446744073709551615"):
+                fail(state, line, start + 1, "integer literal is outside the signed 64-bit range")
+        elif c == "'" or c == "\"":
+            kind = "str"
+            pos = pos + 1
+            while pos < n and chars[pos] != c:
+                if chars[pos] == "\\":
+                    pos = pos + 1
+                    if pos == n:
+                        fail(state, line, pos + 1, "unsupported string escape")
+                    escaped = chars[pos]
+                    if escaped == "n":
+                        value = value + "\n"
+                    elif escaped == "r":
+                        value = value + "\r"
+                    elif escaped == "t":
+                        value = value + "\t"
+                    elif escaped == "\\" or escaped == "'" or escaped == "\"":
+                        value = value + escaped
+                    else:
+                        fail(state, line, pos + 1, "unsupported string escape")
+                else:
+                    value = value + chars[pos]
+                pos = pos + 1
+            if pos == n:
+                fail(state, line, start + 1, "unterminated string")
+            pos = pos + 1
+        else:
+            pair = ""
+            if pos + 1 < n:
+                pair = c + chars[pos + 1]
+            if pair == "->" or pair == "==" or pair == "!=" or pair == "<=" or pair == ">=" or pair == "//":
+                value = pair
+                pos = pos + 2
+            elif symbol(c):
+                value = c
+                pos = pos + 1
+            else:
+                fail(state, line, pos + 1, "unexpected character '" + c + "'")
+        token = syntax.Token(kind, value, line, start + 1)
+        if kind == "symbol":
+            if value == "(" or value == "[":
+                state.groups.append(token)
+            elif value == ")" or value == "]":
+                expected = "("
+                if value == "]":
+                    expected = "["
+                if len(state.groups) == 0:
+                    fail(state, line, start + 1, "mismatched closing delimiter")
+                opening = state.groups.pop()
+                if opening.text != expected:
+                    fail(state, line, start + 1, "mismatched closing delimiter")
+        state.tokens.append(token)
+    if len(state.groups) == 0:
+        state.tokens.append(syntax.Token("newline", "", line, n + 1))
+
+fn lex(source: str, path: str) -> list[syntax.Token]:
+    tokens: list[syntax.Token] = []
+    groups: list[syntax.Token] = []
+    state = State(tokens, [0], groups, path)
+    chars: list[str] = []
+    line = 1
+    for c in source:
+        if c == "\n":
+            if len(chars) > 0 and chars[-1] == "\r":
+                chars.pop()
+            line_tokens(state, chars, line)
+            chars = []
+            line = line + 1
+        else:
+            chars.append(c)
+    if len(chars) > 0:
+        line_tokens(state, chars, line)
+        line = line + 1
+    if len(state.groups) > 0:
+        opening = state.groups[-1]
+        fail(state, opening.line, opening.column, "unclosed delimiter")
+    while len(state.indents) > 1:
+        state.indents.pop()
+        tokens.append(syntax.Token("dedent", "", line, 1))
+    tokens.append(syntax.Token("eof", "", line, 1))
+    return tokens

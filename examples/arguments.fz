@@ -1,0 +1,7 @@
+fn main():
+    # sys.args() contains only the arguments passed to your program.
+    args = sys.args()
+    name = "world"
+    if len(args) > 0:
+        name = args[0]
+    print("Hello, " + name + "!")

@@ -1,0 +1,398 @@
+import syntax
+import lexer
+
+struct Cursor:
+    tokens: list[syntax.Token]
+    position: int
+    source: str
+
+fn peek(cursor: Cursor) -> syntax.Token:
+    return cursor.tokens[cursor.position]
+
+fn fail(cursor: Cursor, message: str):
+    token = peek(cursor)
+    panic(cursor.source + ":" + str(token.line) + ":" + str(token.column) + ": " + message)
+
+fn is_text(cursor: Cursor, text: str) -> bool:
+    token = peek(cursor)
+    return (token.kind == "name" or token.kind == "symbol") and token.text == text
+
+fn eat(cursor: Cursor, text: str) -> bool:
+    if is_text(cursor, text):
+        cursor.position = cursor.position + 1
+        return True
+    return False
+
+fn expect(cursor: Cursor, text: str):
+    if not eat(cursor, text):
+        fail(cursor, "expected '" + text + "'")
+
+fn expect_kind(cursor: Cursor, kind: str):
+    if peek(cursor).kind != kind:
+        fail(cursor, "expected " + kind)
+    cursor.position = cursor.position + 1
+
+fn make(cursor: Cursor, kind: str, text: str, token: syntax.Token) -> syntax.Node:
+    return syntax.node(kind, text, token.line, token.column, cursor.source)
+
+fn reserved(name: str) -> bool:
+    for keyword in ["fn", "def", "return", "if", "elif", "else", "while", "for", "in", "break", "continue", "pass", "True", "False", "None", "and", "or", "not", "with", "as", "struct", "enum", "match", "case", "import", "assert"]:
+        if name == keyword:
+            return True
+    return False
+
+fn identifier(cursor: Cursor) -> str:
+    token = peek(cursor)
+    if token.kind != "name" or reserved(token.text):
+        fail(cursor, "expected an identifier")
+    cursor.position = cursor.position + 1
+    return token.text
+
+fn qualified(cursor: Cursor) -> str:
+    name = identifier(cursor)
+    while eat(cursor, "."):
+        name = name + "." + identifier(cursor)
+    return name
+
+fn type_name(cursor: Cursor) -> str:
+    if eat(cursor, "list"):
+        expect(cursor, "[")
+        element = type_name(cursor)
+        if element == "None":
+            fail(cursor, "list elements cannot have type None")
+        expect(cursor, "]")
+        return "list[" + element + "]"
+    if eat(cursor, "int"):
+        return "int"
+    if eat(cursor, "bool"):
+        return "bool"
+    if eat(cursor, "str"):
+        return "str"
+    if eat(cursor, "None"):
+        return "None"
+    return qualified(cursor)
+
+fn typed_fields(cursor: Cursor, target: syntax.Node):
+    expect(cursor, "(")
+    while not is_text(cursor, ")"):
+        name = identifier(cursor)
+        expect(cursor, ":")
+        field_type = type_name(cursor)
+        if field_type == "None":
+            fail(cursor, "parameters cannot have type None")
+        target.names.append(name)
+        target.types.append(field_type)
+        if not eat(cursor, ","):
+            break
+    expect(cursor, ")")
+
+fn block_start(cursor: Cursor):
+    expect(cursor, ":")
+    expect_kind(cursor, "newline")
+    expect_kind(cursor, "indent")
+
+fn block(cursor: Cursor) -> syntax.Node:
+    result = make(cursor, "block", "", peek(cursor))
+    block_start(cursor)
+    while peek(cursor).kind != "dedent" and peek(cursor).kind != "eof":
+        result.children.append(statement(cursor))
+    expect_kind(cursor, "dedent")
+    return result
+
+fn if_tail(cursor: Cursor, token: syntax.Token) -> syntax.Node:
+    result = make(cursor, "if", "", token)
+    result.children.append(expression(cursor, 0))
+    result.children.append(block(cursor))
+    otherwise = make(cursor, "block", "", peek(cursor))
+    if eat(cursor, "else"):
+        otherwise = block(cursor)
+    elif is_text(cursor, "elif"):
+        elif_token = peek(cursor)
+        cursor.position = cursor.position + 1
+        otherwise.children.append(if_tail(cursor, elif_token))
+    result.children.append(otherwise)
+    return result
+
+fn statement(cursor: Cursor) -> syntax.Node:
+    token = peek(cursor)
+    result = make(cursor, "pass", "", token)
+    if eat(cursor, "with"):
+        expect(cursor, "task")
+        expect(cursor, ".")
+        expect(cursor, "group")
+        expect(cursor, "(")
+        expect(cursor, ")")
+        expect(cursor, "as")
+        result.kind = "group"
+        result.text = identifier(cursor)
+        result.children = block(cursor).children
+        return result
+    elif eat(cursor, "if"):
+        return if_tail(cursor, token)
+    elif eat(cursor, "while"):
+        result.kind = "while"
+        result.children.append(expression(cursor, 0))
+        result.children.append(block(cursor))
+        return result
+    elif eat(cursor, "for"):
+        result.kind = "for"
+        result.text = identifier(cursor)
+        expect(cursor, "in")
+        result.children.append(expression(cursor, 0))
+        result.children.append(block(cursor))
+        return result
+    elif eat(cursor, "match"):
+        result.kind = "match"
+        result.children.append(expression(cursor, 0))
+        block_start(cursor)
+        while peek(cursor).kind != "dedent" and peek(cursor).kind != "eof":
+            arm_token = peek(cursor)
+            expect(cursor, "case")
+            arm = make(cursor, "arm", "_", arm_token)
+            if not eat(cursor, "_"):
+                arm.text = qualified(cursor)
+                expect(cursor, "(")
+                while not is_text(cursor, ")"):
+                    arm.names.append(identifier(cursor))
+                    if not eat(cursor, ","):
+                        break
+                expect(cursor, ")")
+            arm.children = block(cursor).children
+            result.children.append(arm)
+        expect_kind(cursor, "dedent")
+        return result
+    elif eat(cursor, "assert"):
+        result.kind = "assert"
+        result.children.append(expression(cursor, 0))
+        if eat(cursor, ","):
+            result.children.append(expression(cursor, 0))
+    elif eat(cursor, "return"):
+        result.kind = "return"
+        if peek(cursor).kind != "newline":
+            result.children.append(expression(cursor, 0))
+    elif eat(cursor, "break"):
+        result.kind = "break"
+    elif eat(cursor, "continue"):
+        result.kind = "continue"
+    elif eat(cursor, "pass"):
+        result.kind = "pass"
+    else:
+        assignment = False
+        if token.kind == "name" and cursor.position + 1 < len(cursor.tokens):
+            next_token = cursor.tokens[cursor.position + 1]
+            assignment = next_token.kind == "symbol" and (next_token.text == "=" or next_token.text == ":")
+        if assignment:
+            result.kind = "assign"
+            result.text = identifier(cursor)
+            if eat(cursor, ":"):
+                result.type_name = type_name(cursor)
+            expect(cursor, "=")
+            result.children.append(expression(cursor, 0))
+        else:
+            target = expression(cursor, 0)
+            if eat(cursor, "="):
+                value = expression(cursor, 0)
+                if target.kind == "index":
+                    result.kind = "set_index"
+                    result.children.append(target.children[0])
+                    result.children.append(target.children[1])
+                    result.children.append(value)
+                elif target.kind == "field":
+                    result.kind = "set_field"
+                    result.text = target.text
+                    result.children.append(target.children[0])
+                    result.children.append(value)
+                else:
+                    fail(cursor, "assignment target must be a variable, field, or list index")
+            else:
+                result.kind = "expr"
+                result.children.append(target)
+    expect_kind(cursor, "newline")
+    return result
+
+fn arguments(cursor: Cursor) -> list[syntax.Node]:
+    args: list[syntax.Node] = []
+    expect(cursor, "(")
+    while not is_text(cursor, ")"):
+        args.append(expression(cursor, 0))
+        if not eat(cursor, ","):
+            break
+    expect(cursor, ")")
+    return args
+
+fn path(node: syntax.Node) -> str:
+    if node.kind == "name":
+        return node.text
+    if node.kind == "field":
+        base = path(node.children[0])
+        if base != "":
+            return base + "." + node.text
+    return ""
+
+fn precedence(token: syntax.Token) -> int:
+    if token.kind == "name":
+        if token.text == "or":
+            return 1
+        if token.text == "and":
+            return 2
+    if token.kind == "symbol":
+        for comparison in ["==", "!=", "<", ">", "<=", ">="]:
+            if token.text == comparison:
+                return 3
+        if token.text == "+" or token.text == "-":
+            return 4
+        if token.text == "*" or token.text == "//" or token.text == "%":
+            return 5
+    return -1
+
+fn primary(cursor: Cursor) -> syntax.Node:
+    token = peek(cursor)
+    result = make(cursor, "none", "", token)
+    if eat(cursor, "not"):
+        result.kind = "unary"
+        result.text = "not"
+        result.children.append(expression(cursor, 3))
+    elif is_text(cursor, "-") or is_text(cursor, "+"):
+        cursor.position = cursor.position + 1
+        if token.text == "-" and peek(cursor).kind == "int" and peek(cursor).text == "9223372036854775808":
+            cursor.position = cursor.position + 1
+            result.kind = "int"
+            result.text = "-9223372036854775808"
+        else:
+            result.kind = "unary"
+            result.text = token.text
+            result.children.append(expression(cursor, 6))
+    elif token.kind == "int":
+        if len(token.text) > 19 or (len(token.text) == 19 and token.text > "9223372036854775807"):
+            fail(cursor, "integer literal is outside the signed 64-bit range")
+        cursor.position = cursor.position + 1
+        result.kind = "int"
+        result.text = token.text
+    elif token.kind == "str":
+        cursor.position = cursor.position + 1
+        result.kind = "str"
+        result.text = token.text
+    elif token.kind == "name":
+        if token.text == "True" or token.text == "False":
+            cursor.position = cursor.position + 1
+            result.kind = "bool"
+            result.text = token.text
+        else:
+            result.kind = "name"
+            result.text = identifier(cursor)
+    elif eat(cursor, "["):
+        result.kind = "list"
+        while not is_text(cursor, "]"):
+            result.children.append(expression(cursor, 0))
+            if not eat(cursor, ","):
+                break
+        expect(cursor, "]")
+    elif eat(cursor, "("):
+        result = expression(cursor, 0)
+        expect(cursor, ")")
+    else:
+        fail(cursor, "expected an expression")
+    return result
+
+fn expression(cursor: Cursor, minimum: int) -> syntax.Node:
+    token = peek(cursor)
+    left = primary(cursor)
+    while True:
+        if eat(cursor, "."):
+            field = make(cursor, "field", identifier(cursor), token)
+            field.children.append(left)
+            left = field
+        elif is_text(cursor, "("):
+            args = arguments(cursor)
+            name = path(left)
+            call = make(cursor, "call", name, token)
+            if name != "":
+                call.children = args
+            elif left.kind == "field":
+                call.kind = "method"
+                call.text = left.text
+                call.children.append(left.children[0])
+                for arg in args:
+                    call.children.append(arg)
+            else:
+                fail(cursor, "only named functions and methods are callable")
+            left = call
+        elif eat(cursor, "["):
+            start = make(cursor, "none", "", peek(cursor))
+            if not is_text(cursor, ":"):
+                start = expression(cursor, 0)
+            index = make(cursor, "index", "", token)
+            index.children.append(left)
+            index.children.append(start)
+            if eat(cursor, ":"):
+                index.kind = "slice"
+                end = make(cursor, "none", "", peek(cursor))
+                if not is_text(cursor, "]"):
+                    end = expression(cursor, 0)
+                index.children.append(end)
+            expect(cursor, "]")
+            left = index
+        else:
+            break
+    compared = False
+    while True:
+        operator = peek(cursor)
+        priority = precedence(operator)
+        if priority < minimum:
+            break
+        if priority == 3:
+            if compared:
+                fail(cursor, "chained comparisons are not supported yet; use 'and'")
+            compared = True
+        cursor.position = cursor.position + 1
+        right = expression(cursor, priority + 1)
+        binary = make(cursor, "binary", operator.text, token)
+        binary.children.append(left)
+        binary.children.append(right)
+        left = binary
+    return left
+
+fn parse(source: str, path: str) -> syntax.Program:
+    cursor = Cursor(lexer.lex(source, path), 0, path)
+    declarations: list[syntax.Node] = []
+    imports: list[syntax.Node] = []
+    result = syntax.Program(declarations, imports, path)
+    while peek(cursor).kind != "eof":
+        token = peek(cursor)
+        if eat(cursor, "import"):
+            imports.append(make(cursor, "import", qualified(cursor), token))
+            expect_kind(cursor, "newline")
+        elif is_text(cursor, "struct") or is_text(cursor, "enum"):
+            cursor.position = cursor.position + 1
+            declaration = make(cursor, token.text, identifier(cursor), token)
+            block_start(cursor)
+            while peek(cursor).kind != "dedent" and peek(cursor).kind != "eof":
+                field_token = peek(cursor)
+                field_name = identifier(cursor)
+                if declaration.kind == "enum":
+                    variant = make(cursor, "variant", field_name, field_token)
+                    if is_text(cursor, "("):
+                        typed_fields(cursor, variant)
+                    declaration.children.append(variant)
+                else:
+                    expect(cursor, ":")
+                    field_type = type_name(cursor)
+                    if field_type == "None":
+                        fail(cursor, "fields cannot have type None")
+                    declaration.names.append(field_name)
+                    declaration.types.append(field_type)
+                expect_kind(cursor, "newline")
+            expect_kind(cursor, "dedent")
+            declarations.append(declaration)
+        else:
+            if is_text(cursor, "def"):
+                fail(cursor, "Faz uses 'fn', not 'def'")
+            expect(cursor, "fn")
+            function = make(cursor, "fn", identifier(cursor), token)
+            typed_fields(cursor, function)
+            function.type_name = "None"
+            if eat(cursor, "->"):
+                function.type_name = type_name(cursor)
+            function.children = block(cursor).children
+            declarations.append(function)
+    return result

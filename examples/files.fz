@@ -1,0 +1,7 @@
+fn main():
+    # Use a temporary directory so this example leaves no files behind.
+    directory = fs.temp_dir()
+    path = directory + "/note.txt"
+    fs.write_text(path, "Hello from a file!")
+    print(fs.read_text(path))
+    fs.remove_temp(directory)

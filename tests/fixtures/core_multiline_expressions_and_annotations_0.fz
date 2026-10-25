@@ -1,0 +1,17 @@
+fn add(
+    a: int,
+    b: int, # comment
+) -> int:
+    return (
+        a +
+        b
+    )
+fn main():
+    values: list[int] = [
+        20,
+        22,
+    ]
+    print(add(
+        values[0],
+        values[1],
+    ))

@@ -1,0 +1,13 @@
+struct Box:
+    value: int
+
+fn main():
+    values = [Box(1), Box(2), Box(3)]
+    alias = values[1]
+    for item in values:
+        if item.value == 1:
+            values[1] = Box(99)
+            alias.value = 20
+            values.pop()
+        print(item.value)
+    print(len(values), values[1].value)

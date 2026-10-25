@@ -1,0 +1,126 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Faz",
+  "scopeName": "source.faz",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "name": "invalid.illegal.keyword.faz",
+      "match": "\\bdef\\b"
+    },
+    {
+      "match": "\\b(fn)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.function.faz"
+        },
+        "2": {
+          "name": "entity.name.function.faz"
+        }
+      }
+    },
+    {
+      "match": "\\b(struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.declaration.type.faz"
+        },
+        "2": {
+          "name": "entity.name.type.faz"
+        }
+      }
+    },
+    {
+      "name": "keyword.control.faz",
+      "match": "\\b(?:return|if|elif|else|while|for|in|break|continue|pass|with|as|match|case|assert|import)\\b"
+    },
+    {
+      "name": "keyword.operator.logical.faz",
+      "match": "\\b(?:and|or|not)\\b"
+    },
+    {
+      "name": "constant.language.boolean.faz",
+      "match": "\\b(?:True|False)\\b"
+    },
+    {
+      "name": "support.function.builtin.faz",
+      "match": "\\b(?:print|len|panic|str(?:\\.join)?|range|task\\.(?:group|sleep|yield)|http\\.serve|fs\\.(?:read_text|write_text|canonical|exists)|sys\\.args)(?=\\s*\\()"
+    },
+    {
+      "name": "support.type.faz",
+      "match": "\\b(?:int|bool|str|list|None)\\b"
+    },
+    {
+      "name": "entity.name.function.call.faz",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+    },
+    {
+      "name": "constant.numeric.integer.faz",
+      "match": "\\b[0-9]+\\b"
+    },
+    {
+      "name": "keyword.operator.faz",
+      "match": "->|==|!=|<=|>=|//|[+*%<>=-]"
+    },
+    {
+      "name": "punctuation.separator.faz",
+      "match": "[.:,]"
+    },
+    {
+      "name": "punctuation.section.parens.faz",
+      "match": "[()\\[\\]]"
+    },
+    {
+      "name": "variable.other.faz",
+      "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "name": "comment.line.number-sign.faz",
+      "begin": "#",
+      "end": "$"
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.faz",
+          "begin": "\"",
+          "end": "\"|$",
+          "patterns": [
+            {
+              "include": "#escapes"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.faz",
+          "begin": "'",
+          "end": "'|$",
+          "patterns": [
+            {
+              "include": "#escapes"
+            }
+          ]
+        }
+      ]
+    },
+    "escapes": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.faz",
+          "match": "\\\\[nrt\\\\'\"]"
+        },
+        {
+          "name": "invalid.illegal.escape.faz",
+          "match": "\\\\."
+        }
+      ]
+    }
+  }
+}

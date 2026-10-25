@@ -1,0 +1,85 @@
+# Object and list representation used by generated code.
+
+fn rt_object_new(tag: int, count: int, mask: int, line: int) -> int:
+    object = rt_heap(24 + count * 8, 2, line)
+    raw.store(object, tag)
+    raw.store(object + 8, count)
+    raw.store(object + 16, mask)
+    return object
+
+fn rt_object_tag(object: int) -> int:
+    return raw.load(object)
+
+fn rt_object_get(object: int, index: int) -> int:
+    return raw.load(object + 24 + index * 8)
+
+fn rt_object_set(object: int, index: int, value: int) -> int:
+    raw.store(object + 24 + index * 8, value)
+    return 0
+
+fn rt_list_new(managed: int, line: int) -> int:
+    result = rt_heap(32, 1, line)
+    raw.store(result + 24, managed)
+    return result
+
+fn rt_list_len(value: int) -> int:
+    return raw.load(value)
+
+fn rt_list_append(list: int, value: int, line: int) -> int:
+    ref = 0
+    if raw.load(list + 24) != 0:
+        ref = value
+    frame = rt_keep(list, ref, 0)
+    length = raw.load(list)
+    capacity = raw.load(list + 8)
+    if length == capacity:
+        if capacity == 0:
+            capacity = 8
+        else:
+            capacity = capacity * 2
+        items = rt_heap(capacity * 8, 0, line)
+        raw.copy(items, raw.load(list + 16), length * 8)
+        raw.store(list + 16, items)
+        raw.store(list + 8, capacity)
+    raw.store(raw.load(list + 16) + length * 8, value)
+    raw.store(list, length + 1)
+    rt_release(frame)
+    return 0
+
+fn rt_index(index: int, length: int, line: int) -> int:
+    position = index
+    if position < 0:
+        position = position + length
+    if position < 0 or position >= length:
+        rt_panic(line, raw.address("index out of bounds"))
+    return position
+
+fn rt_list_get(list: int, index: int, line: int) -> int:
+    return raw.load(raw.load(list + 16) + rt_index(index, raw.load(list), line) * 8)
+
+fn rt_list_set(list: int, index: int, value: int, line: int) -> int:
+    raw.store(raw.load(list + 16) + rt_index(index, raw.load(list), line) * 8, value)
+    return 0
+
+fn rt_list_pop(list: int, line: int) -> int:
+    length = raw.load(list)
+    if length == 0:
+        rt_panic(line, raw.address("cannot pop an empty list"))
+    length = length - 1
+    slot = raw.load(list + 16) + length * 8
+    result = raw.load(slot)
+    raw.store(slot, 0)
+    raw.store(list, length)
+    return result
+
+fn rt_list_snapshot(list: int, line: int) -> int:
+    frame = rt_keep(list, 0, 0)
+    copy = rt_list_new(raw.load(list + 24), line)
+    raw.store(raw.load(frame + 16) + 8, copy)
+    i = 0
+    while i < raw.load(list):
+        rt_list_append(copy, raw.load(raw.load(list + 16) + i * 8), line)
+        i = i + 1
+    rt_release(frame)
+    return copy
+

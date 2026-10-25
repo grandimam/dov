@@ -1,0 +1,116 @@
+# First self-hosting milestone: a lexer written in Faz, compiled by Faz.
+# Tokens are tagged strings until records/enums are implemented.
+# This is an educational scanner; the full compiler uses src/compiler/lexer.fz.
+
+fn is_digit(c: str) -> bool:
+    return c >= "0" and c <= "9"
+
+fn is_letter(c: str) -> bool:
+    return (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or c == "_"
+
+fn lex(source: str) -> list[str]:
+    tokens: list[str] = []
+    indents = [0]
+    i = 0
+    line = 1
+    beginning = True
+    n = len(source)
+    while i < n:
+        if beginning:
+            indent = 0
+            while i < n and source[i] == " ":
+                indent = indent + 1
+                i = i + 1
+            if i == n:
+                break
+            if source[i] != "#" and source[i] != "\n" and source[i] != "\r":
+                if indent > indents[-1]:
+                    indents.append(indent)
+                    tokens.append("INDENT")
+                else:
+                    while indent < indents[-1]:
+                        indents.pop()
+                        tokens.append("DEDENT")
+                    if indent != indents[-1]:
+                        panic("inconsistent indentation on line " + str(line))
+                beginning = False
+        c = source[i]
+        if c == "\t":
+            panic("tabs are not allowed on line " + str(line))
+        if c == " " or c == "\r":
+            i = i + 1
+            continue
+        if c == "#":
+            while i < n and source[i] != "\n":
+                i = i + 1
+            continue
+        if c == "\n":
+            if not beginning:
+                tokens.append("NEWLINE")
+            beginning = True
+            line = line + 1
+            i = i + 1
+            continue
+        start = i
+        if is_letter(c):
+            i = i + 1
+            while i < n and (is_letter(source[i]) or is_digit(source[i])):
+                i = i + 1
+            tokens.append("NAME:" + source[start:i])
+        elif is_digit(c):
+            i = i + 1
+            while i < n and is_digit(source[i]):
+                i = i + 1
+            tokens.append("INT:" + source[start:i])
+        elif c == "\"" or c == "'":
+            quote = c
+            i = i + 1
+            while i < n and source[i] != quote:
+                if source[i] == "\n" or source[i] == "\r":
+                    panic("unterminated string on line " + str(line))
+                if source[i] == "\\":
+                    i = i + 1
+                    if i == n:
+                        panic("unterminated escape on line " + str(line))
+                    escape = source[i]
+                    if escape != "n" and escape != "r" and escape != "t" and escape != "\\" and escape != "'" and escape != "\"":
+                        panic("invalid escape on line " + str(line))
+                i = i + 1
+            if i == n:
+                panic("unterminated string on line " + str(line))
+            i = i + 1
+            tokens.append("STRING:" + source[start:i])
+        else:
+            pair = ""
+            if i + 1 < n:
+                pair = source[i:i + 2]
+            if pair == "->" or pair == "==" or pair == "!=" or pair == "<=" or pair == ">=" or pair == "//":
+                tokens.append("SYMBOL:" + pair)
+                i = i + 2
+            else:
+                symbols = ".():,+-*%=<>[]"
+                j = 0
+                found = False
+                while j < len(symbols):
+                    if c == symbols[j]:
+                        found = True
+                    j = j + 1
+                if not found:
+                    panic("unexpected character " + c + " on line " + str(line))
+                tokens.append("SYMBOL:" + c)
+                i = i + 1
+    if not beginning:
+        tokens.append("NEWLINE")
+    while len(indents) > 1:
+        indents.pop()
+        tokens.append("DEDENT")
+    tokens.append("EOF")
+    return tokens
+
+fn main():
+    source = "fn main():\n    answer = 40 + 2\n    print(answer)\n"
+    tokens = lex(source)
+    i = 0
+    while i < len(tokens):
+        print(tokens[i])
+        i = i + 1

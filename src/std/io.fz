@@ -1,0 +1,14 @@
+# Standard output and diagnostic output.
+
+fn rt_print(value: int, kind: int) -> int:
+    return raw.call("rt_os_print", value, kind)
+
+fn rt_print_space() -> int:
+    return raw.call("rt_os_putchar", 32)
+
+fn rt_print_newline() -> int:
+    return raw.call("rt_os_putchar", 10)
+
+fn rt_standard_error(message: int) -> int:
+    return raw.call("rt_os_error", message)
+

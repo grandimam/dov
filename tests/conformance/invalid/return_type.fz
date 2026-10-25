@@ -1,0 +1,4 @@
+fn value() -> int:
+    return "text"
+fn main():
+    pass

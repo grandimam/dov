@@ -1,0 +1,34 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the initial compiler from LLVM IR
+        run: clang -x ir -O2 -Wno-override-module bootstrap/seed-${{ matrix.platform }}.ll -o faz
+      - name: Verify self-hosting and native Faz conformance
+        run: ./faz verify
+      - run: ./build/faz run examples/fibonacci.fz
+      - name: Verify installed compiler
+        run: |
+          ./build/faz install "$RUNNER_TEMP/faz-install"
+          "$RUNNER_TEMP/faz-install/bin/faz" run examples/hello.fz
+
+  editor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm test
+        working-directory: editors/vscode

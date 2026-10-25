@@ -1,0 +1,4 @@
+struct Item:
+    value: int
+fn main():
+    print(Item(1).missing)

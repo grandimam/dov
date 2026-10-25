@@ -1,0 +1,22 @@
+fn worker(n: int):
+    task.yield()
+    print(n)
+
+fn early() -> int:
+    with task.group() as outer:
+        outer.spawn(worker, 10)
+        with task.group() as inner:
+            inner.spawn(worker, 20)
+            return 42
+
+fn main():
+    print(early())
+    i = 0
+    while i < 2:
+        i = i + 1
+        with task.group() as group:
+            group.spawn(worker, i)
+            if i == 1:
+                continue
+            break
+    print("finished")

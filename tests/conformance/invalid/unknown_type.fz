@@ -1,0 +1,4 @@
+fn value(n: Missing):
+    pass
+fn main():
+    pass

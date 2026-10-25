@@ -1,0 +1,4 @@
+fn main():
+    print(-7 // 3, -7 % 3, 7 // -3, 7 % -3, -7 // -3, -7 % -3)
+    smallest = -9223372036854775807 - 1
+    print(smallest, smallest % -1)

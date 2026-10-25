@@ -1,0 +1,4 @@
+fn main():
+    with task.group() as group:
+        pass
+    group.spawn(main)

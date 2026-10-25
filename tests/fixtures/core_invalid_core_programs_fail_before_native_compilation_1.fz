@@ -1,0 +1,5 @@
+struct A:
+    x: int
+    x: str
+fn main():
+    pass

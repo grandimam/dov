@@ -1,0 +1,2 @@
+fn main():
+    task.sleep(True)

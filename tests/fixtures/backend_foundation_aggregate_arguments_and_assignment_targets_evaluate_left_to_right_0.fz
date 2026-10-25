@@ -1,0 +1,27 @@
+struct Pair:
+    first: int
+    second: int
+
+fn take(values: list[int]) -> int:
+    value = values.pop()
+    print(value)
+    return value
+
+fn target(values: list[int]) -> list[int]:
+    print("target")
+    return values
+
+fn index() -> int:
+    print("index")
+    return 0
+
+fn main():
+    values = [1, 2, 3, 4]
+    pair = Pair(take(values), take(values))
+    print(pair.first, pair.second)
+    target(values)[index()] = take(values)
+    print(values[0])
+    nested: list[list[int]] = [[], []]
+    nested[0].append(42)
+    nested[1] = nested[0]
+    print(nested[1].pop(), len(nested[0]))

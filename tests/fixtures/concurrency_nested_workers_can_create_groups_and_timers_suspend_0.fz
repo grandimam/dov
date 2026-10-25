@@ -1,0 +1,16 @@
+fn leaf():
+    task.sleep(5)
+    print("leaf")
+
+fn worker():
+    with task.group() as group:
+        group.spawn(leaf)
+    print("worker")
+
+fn main():
+    with task.group() as group:
+        group.spawn(worker)
+        task.yield()
+        print("parent")
+    task.sleep(0)
+    print("done")

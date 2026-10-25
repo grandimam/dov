@@ -1,0 +1,5 @@
+fn main():
+    text = "café🍓"
+    print(len(text), text[3], text[-1], text[1:4], text[:2], text[4:], text[:])
+    print(text[-2:-1], text[0:0] == "", "a" < "b", "é" > "z")
+    print("count=" + str(42), str(True), str(False), str("faz"))

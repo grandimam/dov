@@ -1,0 +1,135 @@
+import support
+
+struct Invalid:
+    statement: str
+    message: str
+
+fn many_tasks(s: support.Suite):
+    directory = support.fresh()
+    binary = support.source(s, directory, "fn worker():\n    task.yield()\n    print(1)\nfn main():\n    with task.group() as group:\n        for i in range(1000):\n            group.spawn(worker)\n    print(2)\n")
+    pieces: list[str] = []
+    for i in range(1000):
+        pieces.append("1\n")
+    pieces.append("2\n")
+    support.success(s, support.capture(binary, []), str.join(pieces, ""), "1000 virtual tasks join")
+    fs.remove_temp(directory)
+    invalid = [
+        Invalid("task.sleep(-1)", "nonnegative"),
+        Invalid("http.serve(\"127.0.0.1\", 0, handle)", "port must"),
+        Invalid("http.serve(\"localhost\", 8080, handle)", "numeric IPv4"),
+    ]
+    for item in invalid:
+        support.runtime_failure(s, "fn handle(target: str) -> str:\n    return target\nfn main():\n    " + item.statement + "\n", item.message)
+
+fn read_all(fd: int, timeout: int) -> str:
+    pieces: list[str] = []
+    while True:
+        text = net.read(fd, 65536, timeout)
+        if text == "":
+            break
+        pieces.append(text)
+    return str.join(pieces, "")
+
+fn request(port: int, data: str, timeout: int) -> str:
+    fd = net.connect("127.0.0.1", port, 1000)
+    if fd < 0:
+        return "connection failed"
+    sent = net.send(fd, data)
+    if sent < 0:
+        net.close(fd)
+        return "send failed"
+    response = read_all(fd, timeout)
+    net.close(fd)
+    return response
+
+fn http_server(s: support.Suite):
+    if sys.env("FAZ_TEST_NO_NETWORK") == "1":
+        print("SKIP: loopback HTTP disabled by FAZ_TEST_NO_NETWORK")
+        return
+    directory = support.fresh()
+    # Choose the ephemeral port only after compilation to minimize the gap
+    # between releasing the reservation and starting the listening server.
+    code = "fn handle(target: str) -> str:\n    if target == \"/slow\":\n        task.sleep(3000)\n        return \"slow\"\n    if target == \"/hello\":\n        return \"Hello, café!\"\n    return target\nfn number(text: str) -> int:\n    result = 0\n    for ch in text:\n        result = result * 10 + str.byte_at(ch, 0) - 48\n    return result\nfn main():\n    args = sys.args()\n    http.serve(\"127.0.0.1\", number(args[0]), handle)\n"
+    binary = support.source(s, directory, code)
+    port = net.free_port()
+    stress = sys.env("FAZ_GC_STRESS")
+    sys.set_env("FAZ_GC_STRESS", "1")
+    pid = sys.start(binary, [str(port)])
+    sys.set_env("FAZ_GC_STRESS", stress)
+    support.check(s, pid > 0, "HTTP child starts", str(pid))
+    if pid <= 0:
+        fs.remove_temp(directory)
+        return
+    ready = False
+    for i in range(500):
+        probe = net.connect("127.0.0.1", port, 10)
+        if probe >= 0:
+            net.close(probe)
+            ready = True
+            break
+        task.sleep(10)
+    support.check(s, ready, "HTTP listener becomes ready", str(port))
+    if not ready:
+        sys.kill(pid)
+        sys.wait(pid)
+        fs.remove_temp(directory)
+        return
+    incomplete = net.connect("127.0.0.1", port, 1000)
+    slow = net.connect("127.0.0.1", port, 1000)
+    support.check(s, incomplete >= 0 and slow >= 0, "HTTP simultaneous clients connect", "")
+    if incomplete < 0 or slow < 0:
+        if incomplete >= 0:
+            net.close(incomplete)
+        if slow >= 0:
+            net.close(slow)
+        sys.kill(pid)
+        sys.wait(pid)
+        fs.remove_temp(directory)
+        return
+    net.send(incomplete, "GET / HTTP/1.1\r\n")
+    net.send(slow, "GET /slow HTTP/1.1\r\nHost: localhost\r\n\r\n")
+    task.sleep(50)
+    fast = request(port, "GET /hello HTTP/1.1\r\nHost: localhost\r\n\r\n", 1000)
+    support.check(s, support.starts(fast, "HTTP/1.1 200 OK\r\n") and support.contains(fast, "Content-Length: 13\r\n") and support.ends(fast, "Hello, café!"), "fast HTTP client progresses while other clients suspend", fast)
+    for i in range(50):
+        target = "/echo?x=" + str(i)
+        response = request(port, "GET " + target + " HTTP/1.0\r\n\r\n", 1000)
+        support.check(s, support.ends(response, target), "managed HTTP target survives GC " + str(i), response)
+    invalid = [
+        Invalid("POST / HTTP/1.1\r\n\r\n", "405"),
+        Invalid("garbage\r\n\r\n", "400"),
+        Invalid("GET / HTTP/9.9\r\n\r\n", "400"),
+    ]
+    for item in invalid:
+        response = request(port, item.statement, 1000)
+        support.check(s, support.starts(response, "HTTP/1.1 " + item.message), "HTTP protocol rejection " + item.message, response)
+    pieces: list[str] = ["GET / HTTP/1.1\r\nX: "]
+    for i in range(16384 - len(pieces[0])):
+        pieces.append("a")
+    response = request(port, str.join(pieces, ""), 1000)
+    support.check(s, support.starts(response, "HTTP/1.1 431"), "HTTP bounded headers", response)
+    nul = net.connect("127.0.0.1", port, 1000)
+    if nul >= 0:
+        net.send_bytes(nul, [71, 69, 84, 32, 47, 0, 32, 72, 84, 84, 80, 47, 49, 46, 49, 13, 10, 13, 10])
+        response = read_all(nul, 1000)
+        net.close(nul)
+        support.check(s, support.starts(response, "HTTP/1.1 400"), "HTTP rejects NUL bytes", response)
+    else:
+        support.check(s, False, "HTTP NUL client connects", "connection failed")
+    response = read_all(slow, 5000)
+    net.close(slow)
+    support.check(s, support.ends(response, "slow"), "sleeping HTTP handler resumes", response)
+    response = read_all(incomplete, 6000)
+    net.close(incomplete)
+    support.check(s, support.starts(response, "HTTP/1.1 408"), "incomplete HTTP request times out", response)
+    response = request(port, "GET /still-alive HTTP/1.0\r\n\r\n", 1000)
+    support.check(s, support.ends(response, "/still-alive"), "HTTP server survives rejected requests", response)
+    sys.kill(pid)
+    status = sys.wait(pid)
+    support.check(s, status == 137, "HTTP process reaped after kill", str(status))
+    fs.remove_temp(directory)
+
+fn run(s: support.Suite):
+    print("Task and HTTP contracts")
+    many_tasks(s)
+    http_server(s)

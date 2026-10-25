@@ -1,0 +1,27 @@
+import support.model
+
+fn unpack(answer: model.Answer) -> str:
+    match answer:
+        case model.Answer.Good(item):
+            return item.text
+        case model.Answer.Empty():
+            return "empty"
+
+fn serve():
+    http.serve("127.0.0.1", 0, model.handler)
+
+fn main():
+    args = sys.args()
+    assert len(args) == 1
+    filename = args[0]
+    text = unpack(model.answer("module café"))
+    fs.write_text(filename, text)
+    assert fs.exists(filename)
+    canonical = fs.canonical(filename)
+    assert canonical[:1] == "/"
+    assert fs.same_file(canonical, filename)
+    assert fs.canonical(canonical) == canonical
+    print(fs.read_text(filename))
+    with task.group() as jobs:
+        jobs.spawn(model.worker, model.handler("/hello"))
+    print(unpack(model.Answer.Empty()))

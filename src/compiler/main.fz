@@ -1,0 +1,160 @@
+import syntax
+import modules
+import semantic
+import llvm_emitter
+import runtime_source
+import runtime_builder
+import toolchain
+import project
+
+fn error(message: str):
+    sys.error("error: " + message)
+    sys.exit(1)
+
+fn help():
+    print(str.join([
+        "Faz — Python-inspired syntax, native executables\n\n",
+        "Usage:\n",
+        "  faz build <file.fz> [-o <executable>]\n",
+        "  faz run <file.fz> [-- <program arguments>]\n",
+        "  faz check <file.fz>\n",
+        "  faz emit-llvm <file.fz> [-o <file.ll>]\n",
+        "  faz test [checkout]\n",
+        "  faz build-self [checkout]\n",
+        "  faz verify [checkout]\n",
+        "  faz refresh-seed [checkout]\n",
+        "  faz install [prefix]\n",
+        "  faz --help\n",
+        "  faz --version\n\n",
+        "Builds require LLVM/Clang. Set FAZ_CLANG to its executable path.\n",
+        "Default build output: build/<source-name>",
+    ], ""))
+
+fn prepare_output(program: syntax.Program, output: str):
+    if output == "":
+        error("output path must not be empty")
+    if len(output) >= 3 and output[-3:] == ".fz":
+        error("refusing to overwrite a .fz source file")
+    if fs.same_file(program.source, output):
+        error("output must not overwrite the input file")
+    for declaration in program.declarations:
+        if fs.same_file(declaration.source, output):
+            error("output must not overwrite an imported source file")
+    for source in program.imports:
+        if fs.same_file(source.source, output):
+            error("output must not overwrite an imported source file")
+    fs.make_parent(output)
+
+fn default_output(input: str) -> str:
+    start = 0
+    for index in range(len(input)):
+        if input[index] == "/":
+            start = index + 1
+    name = input[start:]
+    end = len(name)
+    for index in range(1, len(name)):
+        if name[index] == ".":
+            end = index
+    return "build/" + name[:end]
+
+fn main():
+    args = sys.args()
+    if len(args) == 0:
+        help()
+        return
+    if project.dispatch(args):
+        return
+    command = args[0]
+    if command == "embed-runtime":
+        if len(args) != 4 or args[2] != "-o":
+            error("usage: faz embed-runtime <src-directory> -o <runtime_source.fz>")
+        embedded = runtime_builder.embed(args[1])
+        fs.write_text(args[3], embedded)
+        return
+    if command == "--help" or command == "-h":
+        help()
+        return
+    if command == "--version":
+        print("faz 0.1.0")
+        return
+    # Keep the two-positional emit form for old bootstrap drivers.
+    legacy = False
+    if command != "build" and command != "run" and command != "check" and command != "emit-llvm" and command != "emit-llvm-library":
+        if len(args) == 2 and len(command) >= 3 and command[-3:] == ".fz":
+            legacy = True
+        else:
+            error("unknown command '" + command + "'; see faz --help")
+    if len(args) < 2:
+        error("expected a .fz source file; see faz --help")
+    input = args[1]
+    output = ""
+    has_output = False
+    program_args: list[str] = []
+    platform = sys.platform()
+    if legacy:
+        input = args[0]
+        output = args[1]
+        has_output = True
+        command = "emit-llvm"
+    else:
+        index = 2
+        while index < len(args):
+            argument = args[index]
+            if argument == "--" and command == "run":
+                index = index + 1
+                while index < len(args):
+                    program_args.append(args[index])
+                    index = index + 1
+            elif argument == "-o" and (command == "build" or command == "emit-llvm" or command == "emit-llvm-library") and not has_output:
+                index = index + 1
+                if index >= len(args):
+                    error("expected a path after -o")
+                output = args[index]
+                has_output = True
+                index = index + 1
+            elif argument == "--platform" and command == "emit-llvm":
+                index = index + 1
+                if index >= len(args):
+                    error("expected darwin or linux after --platform")
+                platform = args[index]
+                if platform != "darwin" and platform != "linux":
+                    error("supported platforms are darwin and linux")
+                index = index + 1
+            else:
+                error("unexpected argument '" + argument + "'; see faz --help")
+    program = modules.load(input)
+    if command == "check":
+        semantic.check(program)
+        print("Checked " + input)
+        return
+    generated = ""
+    if command == "emit-llvm-library":
+        generated = llvm_emitter.emit_library(program)
+    else:
+        generated = llvm_emitter.emit_complete(program, runtime_source.source(platform))
+    if command == "emit-llvm" or command == "emit-llvm-library":
+        if has_output:
+            prepare_output(program, output)
+            fs.write_text(output, generated)
+        else:
+            print(generated)
+        return
+    if command == "build":
+        if not has_output:
+            output = default_output(input)
+        prepare_output(program, output)
+    temporary = fs.temp_dir()
+    source = temporary + "/program.ll"
+    binary = temporary + "/program"
+    fs.write_text(source, generated)
+    toolchain.native(source, binary)
+    if command == "build":
+        fs.copy_executable(binary, output)
+        fs.remove_temp(temporary)
+        print("Built " + output)
+    else:
+        status = sys.run(binary, program_args)
+        fs.remove_temp(temporary)
+        if status < 0:
+            error("cannot run executable")
+        sys.exit(status)

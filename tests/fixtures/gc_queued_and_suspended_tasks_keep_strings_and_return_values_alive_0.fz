@@ -1,0 +1,15 @@
+fn worker(label: str):
+    held = [label + ":held", str(1)]
+    task.yield()
+    for i in range(20):
+        scratch = str(i) + label
+        task.yield()
+    assert held[0] == label + ":held"
+fn result() -> str:
+    answer = "answer" + str(42)
+    with task.group() as group:
+        for i in range(40):
+            group.spawn(worker, "task" + str(i))
+        return answer
+fn main():
+    print(result())

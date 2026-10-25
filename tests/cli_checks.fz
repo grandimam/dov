@@ -1,0 +1,147 @@
+import support
+
+fn executable(name: str) -> str:
+    if support.contains(name, "/"):
+        return name
+    paths = sys.env("PATH") + ":"
+    start = 0
+    for i in range(len(paths)):
+        if paths[i] == ":":
+            path = paths[start:i] + "/" + name
+            if fs.exists(path):
+                return path
+            start = i + 1
+    return ""
+
+fn no_faz_temporaries(path: str) -> bool:
+    for name in fs.entries(path):
+        if support.starts(name, "faz-"):
+            return False
+    return True
+
+fn cli(s: support.Suite):
+    for option in ["--help", "-h", "--version"]:
+        result = support.capture(s.compiler, [option])
+        support.check(s, result.status == 0 and support.contains(result.out + result.err, "faz"), "CLI " + option, result.out + result.err)
+    support.success(s, support.capture(s.compiler, ["--version"]), "faz 0.1.0\n", "Faz version branding")
+    result = support.capture(s.compiler, ["--help"])
+    support.check(s, support.contains(result.out, "file.fz") and support.contains(result.out, "FAZ_CLANG"), "Faz CLI source and toolchain names", result.out)
+    result = support.capture(s.compiler, [])
+    support.check(s, result.status == 0, "CLI default help", result.err)
+    for command in ["nonsense", "check", "build", "run", "emit-llvm"]:
+        result = support.capture(s.compiler, [command])
+        support.check(s, result.status != 0, "CLI incomplete " + command, result.err)
+    directory = support.fresh()
+    main = directory + "/main.fz"
+    fs.write_text(main, "fn main():\n    print(\"native\")\n")
+    original_clang = sys.env("FAZ_CLANG")
+    sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
+    result = support.capture(s.compiler, ["check", main])
+    support.check(s, result.status == 0, "check needs no LLVM tool", result.err)
+    sys.set_env("FAZ_CLANG", original_clang)
+    emitted = directory + "/out.ll"
+    result = support.capture(s.compiler, ["emit-llvm", main, "-o", emitted])
+    support.check(s, result.status == 0 and support.contains(fs.read_text(emitted), "define i32 @main("), "direct LLVM emission", result.err)
+    support.success(s, support.capture(s.compiler, ["run", main]), "native\n", "CLI run")
+    result = support.capture(s.compiler, [main, emitted])
+    support.check(s, result.status == 0 and support.contains(fs.read_text(emitted), "define i32 @main("), "three-character extension in positional LLVM emission", result.err)
+    result = support.capture(s.compiler, ["emit-llvm", main, "-o", ".fz"])
+    support.check(s, result.status != 0 and support.contains(result.err, "refusing to overwrite a .fz source file") and not fs.exists(".fz"), "protect shortest .fz output path", result.err)
+    binary = directory + "/out dir/program"
+    support.build(s, main, binary)
+    path = sys.env("PATH")
+    sys.set_env("PATH", "")
+    support.success(s, support.capture(binary, []), "native\n", "standalone program")
+    sys.set_env("PATH", path)
+    fs.write_text(main, "fn main():\n    print(str.join(sys.args(), \"|\"))\n")
+    support.success(s, support.capture(s.compiler, ["run", main, "--", "a b", "\"quoted\"", "$HOME;false"]), "a b|\"quoted\"|$HOME;false\n", "literal argument forwarding")
+    sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
+    result = support.capture(s.compiler, ["build", main, "-o", directory + "/failed"])
+    support.check(s, result.status != 0 and support.contains(result.err, "LLVM"), "LLVM launch failure", result.err)
+    sys.set_env("FAZ_CLANG", original_clang)
+    fs.write_text(main, "fn value() -> int:\n    sys.exit(17)\nfn main():\n    print(value())\n")
+    temporary = directory + "/tmp"
+    fs.make_parent(temporary + "/unused")
+    tmp = sys.env("TMPDIR")
+    sys.set_env("TMPDIR", temporary)
+    result = support.capture(s.compiler, ["run", main])
+    support.check(s, result.status == 17 and no_faz_temporaries(temporary), "run exit and temp cleanup", result.err)
+    sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
+    result = support.capture(s.compiler, ["build", main, "-o", directory + "/failed"])
+    support.check(s, result.status != 0 and no_faz_temporaries(temporary), "build failure temp cleanup", result.err)
+    sys.set_env("FAZ_CLANG", original_clang)
+    sys.set_env("TMPDIR", tmp)
+    clang = original_clang
+    if clang == "":
+        clang = "clang"
+    resolved = executable(clang)
+    support.check(s, resolved != "", "locate LLVM tool", clang)
+    if resolved != "":
+        spaced = directory + "/native compiler with spaces/clang"
+        fs.make_parent(spaced)
+        fs.symlink(resolved, spaced)
+        sys.set_env("FAZ_CLANG", spaced)
+        fs.write_text(main, "fn main():\n    print(42)\n")
+        support.success(s, support.capture(s.compiler, ["run", main]), "42\n", "LLVM path with spaces")
+        sys.set_env("FAZ_CLANG", original_clang)
+    keep = directory + "/keep.fz"
+    fs.write_text(keep, "# keep\n")
+    fs.write_text(main, "fn main():\n    print(42)\n")
+    alias = directory + "/alias.ll"
+    fs.symlink(main, alias)
+    for command in ["build", "emit-llvm"]:
+        for output in [main, keep, alias]:
+            result = support.capture(s.compiler, [command, main, "-o", output])
+            support.check(s, result.status != 0, "protect source " + output, result.err)
+    support.check(s, fs.read_text(main) == "fn main():\n    print(42)\n" and fs.read_text(keep) == "# keep\n", "source preservation", main)
+    empty = directory + "/empty.fz"
+    fs.write_text(empty, "")
+    fs.write_text(main, "import empty\nfn main():\n    pass\n")
+    dependency = directory + "/dependency.ll"
+    fs.symlink(empty, dependency)
+    result = support.capture(s.compiler, ["emit-llvm", main, "-o", dependency])
+    support.check(s, result.status != 0 and fs.read_text(empty) == "", "protect empty imported module", result.err)
+    fs.write_text(main, "fn main():\n    print(missing)\n")
+    existing = directory + "/existing.ll"
+    fs.write_text(existing, "preserve me\n")
+    result = support.capture(s.compiler, ["emit-llvm", main, "-o", existing])
+    support.check(s, result.status != 0 and fs.read_text(existing) == "preserve me\n", "preserve output on source error", result.err)
+    standalone = directory + "/standalone-faz"
+    fs.copy_executable(s.compiler, standalone)
+    fs.write_text(main, "fn main():\n    print(42)\n")
+    sys.set_env("PATH", "")
+    result = support.capture(standalone, ["emit-llvm", main, "-o", emitted])
+    sys.set_env("PATH", path)
+    support.check(s, result.status == 0 and support.contains(fs.read_text(emitted), "define i32 @main("), "standalone compiler emit", result.err)
+    fs.remove_temp(directory)
+
+fn io(s: support.Suite):
+    directory = support.fresh()
+    binary = support.source(s, directory, "fn main():\n    args = sys.args()\n    text = fs.read_text(args[0])\n    fs.write_text(args[1], text + \"🍓\")\n    print(len(text), args[2])\n")
+    input = directory + "/input.txt"
+    output = directory + "/output.txt"
+    fs.write_text(input, "café")
+    support.success(s, support.capture(binary, [input, output, "argument with spaces"]), "4 argument with spaces\n", "Unicode files and arguments")
+    support.check(s, fs.read_text(output) == "café🍓", "Unicode file bytes", output)
+    result = support.capture(binary, [directory + "/missing.txt", output, "x"])
+    support.check(s, result.status != 0 and support.contains(result.err, "missing.txt"), "missing file error", result.err)
+    invalid: list[list[int]] = [[255], [97, 0, 98], [194], [226, 130], [240, 159, 141], [192, 128], [237, 160, 128], [244, 144, 128, 128]]
+    for bytes in invalid:
+        fs.write_bytes(input, bytes)
+        result = support.capture(binary, [input, output, "x"])
+        support.check(s, result.status == 1, "reject invalid text bytes", result.err)
+    parts: list[str] = []
+    for i in range(8190):
+        parts.append("x")
+    text = str.join(parts, "") + "é🍓"
+    fs.write_text(input, text)
+    support.success(s, support.capture(binary, [input, output, "x"]), "8192 x\n", "UTF8 boundary spanning read buffer")
+    support.check(s, fs.read_text(output) == text + "🍓", "large Unicode content", output)
+    sys.set_env("FAZ_TEST_VALUE", "value with spaces")
+    sys.set_env("FAZ_TEST_UNDEFINED_VALUE", "")
+    support.run_source(s, "fn main():\n    assert sys.env(\"FAZ_TEST_VALUE\") == \"value with spaces\"\n    assert sys.env(\"FAZ_TEST_UNDEFINED_VALUE\") == \"\"\n    print(sys.run(\"/definitely/missing/faz-child\", []))\n", "-1\n")
+    fs.remove_temp(directory)
+
+fn run(s: support.Suite):
+    cli(s)
+    io(s)

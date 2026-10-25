@@ -1,0 +1,5 @@
+fn work() -> int:
+    return 1
+fn main():
+    with task.group() as jobs:
+        jobs.spawn(work)

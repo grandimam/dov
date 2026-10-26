@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>A curious fox. A small language. Your next side project.</strong><br />
+  <strong>A small language. A curious fox. No compelling business case.</strong><br />
   Python-inspired syntax · Static types · Explicit mutation · Automatic garbage collection
 </p>
 
@@ -18,22 +18,33 @@
   <a href="https://github.com/grandimam/faz/releases/latest"><strong>Download</strong></a> &nbsp; / &nbsp;
   <a href="docs/core-language.md">Language guide</a> &nbsp; / &nbsp;
   <a href="examples/README.md">Examples</a> &nbsp; / &nbsp;
+  <a href="#benchmarks-faz-python-and-mojo">Benchmarks &amp; humility</a> &nbsp; / &nbsp;
   <a href="editors/vscode/README.md">VS Code</a>
 </p>
 
 ---
 
-## Less ceremony. More making.
+## I could have just written the script.
 
-**Write a small program. Turn it into a real executable.** Faz pairs familiar,
-indentation-based syntax with static checking and an LLVM-powered native compiler.
-Mutation is explicit. Memory is garbage-collected. The resulting binary runs
-without a Faz installation, using your operating system's libraries.
+Instead, I built a programming language. For myself. For the sake of it.
+The world had enough languages; apparently I needed a hobby with a linker.
 
-Built for **small tools and language experiments**—not a drop-in replacement for
-Python, and not production-stable yet.
+**Faz is an unserious personal project with a real native compiler.**
+Python-inspired indentation, static types, explicit mutation, garbage collection,
+and LLVM underneath. Write a small program, build an executable, and run it
+without Faz installed. Your operating system's libraries still have to show up.
 
-### Familiar at first glance. Explicit where it matters.
+> **Compiling something that looks like Python does not automatically make it
+> fast. Or better. Or a good use of a weekend.**
+> A compiler turns your decisions into machine code. It does not turn them into
+> good decisions. We have [benchmarks](#benchmarks-faz-python-and-mojo).
+
+This is **not a Python compiler**, a Python replacement, or a startup pitch.
+Python packages do not run here. I made it to explore language design and build
+small tools—not because Python, Rust, Go, or Mojo needed my intervention.
+Try it if that sounds fun. Please do not migrate payroll.
+
+### Looks familiar. Has opinions.
 
 ```python
 fn main():
@@ -62,13 +73,13 @@ weekend tool
     </td>
     <td width="33%" valign="top">
       <h3>03 · Ship a binary</h3>
-      Check, run, or compile to a native executable. Tracing GC handles heap lifetime; OS libraries are still required.
+      Check, run, or compile to a native executable. Tracing GC handles heap lifetime; OS libraries are still required. A binary is a delivery format, not a performance trophy.
     </td>
   </tr>
 </table>
 
 > [!NOTE]
-> **Small, curious, and still growing.** Faz is early-stage software: syntax and APIs can change. User programs use the new core rules; the compiler itself and some older examples still use an explicit legacy dialect. [Know the boundaries →](#current-boundaries)
+> **The fox is cute. The stability guarantees are not.** Faz is early-stage software: syntax and APIs can change. User programs use the new core rules; the compiler itself and some older examples still use an explicit legacy dialect. [Know the boundaries →](#current-boundaries)
 
 ## Try it
 
@@ -180,32 +191,73 @@ language—not something to infer from this tiny example.
 
 ## Benchmarks: Faz, Python, and Mojo
 
-**Measured runs, not estimates.** Matching algorithms and inputs, with every
-output checked against an independent reference. Lower times are better.
+### 🦊 Native code. Unsupervised confidence.
 
-| Workload | Faz | Python | Mojo |
+I gave the fox a stopwatch. This was a mistake for its self-esteem.
+
+<table>
+  <tr>
+    <td width="33%" align="center" valign="top">
+      <h3>🚀 The screenshot</h3>
+      <strong>11.9× faster than Python</strong><br />
+      <sub>Modular Fibonacci, plain CPython loops.<br />The number I would put on a pitch deck.</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <h3>🫠 The next slide</h3>
+      <strong>6.5× slower than Mojo</strong><br />
+      <sub>Collection allocation workload.<br />The number the pitch deck would mysteriously omit.</sub>
+    </td>
+    <td width="33%" align="center" valign="top">
+      <h3>🧪 The sample size</h3>
+      <strong>3 tiny workloads</strong><br />
+      <sub>One laptop. Nine runs per test.<br />Not a referendum on programming languages.</sub>
+    </td>
+  </tr>
+</table>
+
+**The whole scoreboard.** Median wall time; lower is better. 🥇 marks the fastest
+in each row, not the best language for your actual problem.
+
+| Workload | 🦊 Faz | 🐍 Python | 🔥 Mojo |
 | :--- | ---: | ---: | ---: |
-| Modular Fibonacci · 20 million steps | 78.96 ms | 939.72 ms | 90.03 ms |
-| Prime sieve · through 3 million | 112.25 ms | 393.45 ms | 21.72 ms |
-| Collection allocation · 100,000 × 128 integers | 432.89 ms | 786.08 ms | 66.36 ms |
+| **Number crunching** · modular Fibonacci, 20M steps | **🥇 78.96 ms** | 939.72 ms | 90.03 ms |
+| **Prime hunting** · sieve through 3M | 112.25 ms | 393.45 ms | **🥇 21.72 ms** |
+| **List wrangling** · 100K collections × 128 integers | 432.89 ms | 786.08 ms | **🥇 66.36 ms** |
 
-Apple M2 Pro · macOS 26.5.2 · Faz 0.1.0 · CPython 3.13.0 · Mojo 0.26.2.0.
-Median of nine measured runs after two warmups, with randomized language order.
-Times include process startup and checksum output; compilation is excluded.
-Faz and Mojo use native builds at optimization level 3. Python uses ordinary
-loops without NumPy or a JIT. Python integers are arbitrary-precision; Faz and
-Mojo use native 64-bit integers here. All results fit within signed 64 bits.
+Faz beat plain Python in all three tests, by about **1.8–12×**. It narrowly beat
+Mojo on arithmetic, then took about **5–6.5× as long** on the collection tests.
+Apparently, giving a fox LLVM does not teach it to organize its belongings.
 
-**The takeaway:** Faz was about **1.8–12× faster than plain Python** in these tests.
-It slightly beat Mojo on number calculations, while Mojo was about **5–6.5× faster**
-on the collection-heavy workloads. Faz is stronger at scalar calculation than
-at managing lists today.
+> [!IMPORTANT]
+> **Native ≠ automatically fast. Faster here ≠ better everywhere.**
+> These compare ordinary Python loops with compiled Faz and Mojo—not NumPy,
+> Numba, or Python calling optimized native libraries. No GPU, parallelism,
+> networking, or memory-use claims. Three microbenchmarks do not make Faz a
+> better Python. They make it a language with three microbenchmarks.
 
-These are three local microbenchmarks—not a general language ranking. They do
-not measure accelerated Python libraries, GPU workloads, parallelism, networking,
-or memory use.
+<details>
+<summary><strong>🔬 The receipts: machine, versions, and methodology</strong></summary>
 
-Reproduce from the repository root with Faz, Python 3, and Mojo installed:
+- **Machine:** Apple M2 Pro, macOS 26.5.2.
+- **Versions:** Faz 0.1.0, CPython 3.13.0, Mojo 0.26.2.0.
+- **Sampling:** median of nine measured runs after two warmups per workload and
+  language; randomized language order.
+- **Timing:** process startup and checksum output included; compilation excluded.
+- **Builds:** Faz and Mojo at optimization level 3. Mojo uses its default host
+  CPU targeting. Python uses plain CPython loops, without NumPy or a JIT.
+- **Integers:** arbitrary-precision in Python; native 64-bit in Faz and Mojo here.
+  Every result fits within signed 64 bits.
+- **Correctness:** matching algorithms and inputs; outputs checked against
+  independent reference algorithms, including boundary cases.
+
+These are local measurements, not a universal ranking or a comparison of the
+latest releases. Different implementations and different workloads can change
+the outcome. The fox reserves no right to cherry-pick the next run.
+
+</details>
+
+**Bring your own stopwatch.** From the repository root, with Faz, Python 3, and
+Mojo installed:
 
 ```sh
 python3 examples/benchmarks/compare_python_mojo.py --runs 9
@@ -217,8 +269,9 @@ python3 examples/benchmarks/compare_python_mojo.py --runs 9
 
 ## Faz makes Faz
 
-**The compiler is written in Faz.** It uses the language's earlier dialect and
-emits LLVM IR directly. Checked-in seeds let Clang build the first compiler;
+**The compiler is written in Faz.** Because apparently writing one language
+wasn't enough; I also wanted it to be its own problem.
+It uses the language's earlier dialect and emits LLVM IR directly. Checked-in seeds let Clang build the first compiler;
 that compiler rebuilds successive generations from source.
 
 ```text
@@ -260,6 +313,8 @@ embedding and seed maintenance.
 
 ## Current boundaries
 
+The jokes are optional. These limitations are not.
+
 Faz is a work in progress, **not a finished ownership or resource model**.
 Borrowed aggregate escapes, partial moves, general cyclic value operations, and
 general resource scopes remain unresolved or conservatively rejected. Pattern
@@ -275,8 +330,8 @@ supported behavior.
 
 <p align="center">
   <img src="assets/faz.png" alt="Faz, our resident fox mascot" width="140" /><br />
-  <strong>Small language. Big ideas. Tiny paws.</strong><br />
-  Make something small. See where it goes.<br /><br />
+  <strong>Small language. Questionable priorities. Tiny paws.</strong><br />
+  Built for myself. Shared in case your hobbies are also getting out of hand.<br /><br />
   <a href="#try-it">Try Faz</a> &nbsp;·&nbsp;
   <a href="examples/README.md">Find an example</a> &nbsp;·&nbsp;
   <a href="https://github.com/grandimam/faz/issues">Share a bug or an idea</a><br /><br />

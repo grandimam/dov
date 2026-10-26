@@ -178,38 +178,42 @@ language—not something to infer from this tiny example.
 
 <sub>The VS Code extension installs locally; it is not on the Marketplace and has no language server yet. Older examples that need <code>--legacy-language</code> are marked in the example guide.</sub>
 
-## Benchmarks: Faz, Rust, and Go
+## Benchmarks: Faz, Python, and Mojo
 
-**Measured native code, not estimates.** Matching algorithms and signed 64-bit
-integers, with every output checked against an independent Python reference.
-Lower times are better.
+**Measured runs, not estimates.** Matching algorithms and inputs, with every
+output checked against an independent reference. Lower times are better.
 
-| Workload | Faz | Rust | Go |
+| Workload | Faz | Python | Mojo |
 | :--- | ---: | ---: | ---: |
-| Modular Fibonacci · 20 million steps | 78.47 ms | 66.41 ms | 67.18 ms |
-| Prime sieve · through 3 million | 112.68 ms | 17.27 ms | 22.70 ms |
-| Collection allocation · 100,000 × 128 integers | 431.52 ms | 34.79 ms | 45.50 ms |
+| Modular Fibonacci · 20 million steps | 78.96 ms | 939.72 ms | 90.03 ms |
+| Prime sieve · through 3 million | 112.25 ms | 393.45 ms | 21.72 ms |
+| Collection allocation · 100,000 × 128 integers | 432.89 ms | 786.08 ms | 66.36 ms |
 
-Apple M2 Pro · macOS 26.5.2 · Faz 0.1.0 · Rust 1.92.0 · Go 1.22.3.
+Apple M2 Pro · macOS 26.5.2 · Faz 0.1.0 · CPython 3.13.0 · Mojo 0.26.2.0.
 Median of nine measured runs after two warmups, with randomized language order.
 Times include process startup and checksum output; compilation is excluded.
-Faz uses `FAZ_OPT_LEVEL=3`, Rust uses `-C opt-level=3`, and Go uses its default
-optimized build.
+Faz and Mojo use native builds at optimization level 3. Python uses ordinary
+loops without NumPy or a JIT. Python integers are arbitrary-precision; Faz and
+Mojo use native 64-bit integers here. All results fit within signed 64 bits.
 
-**The takeaway:** Faz was within about 18% of Rust and Go on this scalar workload,
-but took roughly 5–12× as long on these collection-heavy workloads. These are
-three local microbenchmarks—not a general language ranking or a claim about
-parallelism, networking, memory use, or the latest compiler releases.
+**The takeaway:** Faz was about **1.8–12× faster than plain Python** in these tests.
+It slightly beat Mojo on number calculations, while Mojo was about **5–6.5× faster**
+on the collection-heavy workloads. Faz is stronger at scalar calculation than
+at managing lists today.
 
-Reproduce from the repository root with Faz, Rust, Go, and Python 3 installed:
+These are three local microbenchmarks—not a general language ranking. They do
+not measure accelerated Python libraries, GPU workloads, parallelism, networking,
+or memory use.
+
+Reproduce from the repository root with Faz, Python 3, and Mojo installed:
 
 ```sh
-python3 examples/benchmarks/run.py --runs 9
+python3 examples/benchmarks/compare_python_mojo.py --runs 9
 ```
 
-**[Methodology and source →](examples/benchmarks/README.md)** ·
-[Full results and executable sizes](examples/benchmarks/RESULTS.md) ·
-[Raw measurements](examples/benchmarks/results.json)
+**[Methodology and source →](examples/benchmarks/README.md#python-and-mojo-comparison)** ·
+[Full results](examples/benchmarks/python-mojo-results.md) ·
+[Raw measurements](examples/benchmarks/python-mojo-results.json)
 
 ## Faz makes Faz
 

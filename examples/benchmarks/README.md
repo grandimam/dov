@@ -3,6 +3,24 @@
 See **[measured results](RESULTS.md)** and **[raw samples](results.json)** from an
 Apple M2 Pro. These are actual native executable timings, not estimates.
 
+## Python and Mojo comparison
+
+A separate measured run compares Faz with **plain CPython 3.13.0** and
+**native Mojo 0.26.2.0**, using the same workloads and inputs:
+
+**[Results →](python-mojo-results.md)** · [Raw samples](python-mojo-results.json)
+
+```sh
+python3 examples/benchmarks/compare_python_mojo.py --runs 9
+```
+
+Requires the Mojo language compiler in addition to Faz and Python. Faz and Mojo
+use optimization level 3; Python uses ordinary loops without NumPy or a JIT.
+Python integers have arbitrary precision, unlike the native 64-bit integers
+used here by Faz and Mojo. Checksums match and fit within signed 64 bits.
+This runner reuses the independent reference algorithms from `run.py` and
+writes fresh reports to `build/benchmarks/python-mojo-results.*`.
+
 ## What Faz can do today
 
 The accompanying [Taskboard](../taskboard/README.md) is a working multi-module

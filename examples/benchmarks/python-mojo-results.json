@@ -1,0 +1,205 @@
+{
+  "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "cpu": "Apple M2 Pro",
+  "versions": {
+    "Faz": "faz 0.1.0",
+    "Python": "CPython 3.13.0",
+    "Mojo": "Mojo 0.26.2.0 (d627decc)"
+  },
+  "build_commands": [
+    [
+      "/Users/grandimam/.local/bin/faz",
+      "build",
+      "/Users/grandimam/Workspace/taraqqi/faz/examples/benchmarks/workload.fz",
+      "-o",
+      "/Users/grandimam/Workspace/taraqqi/faz/build/benchmarks/faz"
+    ],
+    [
+      "/Library/Frameworks/Python.framework/Versions/3.13/bin/mojo",
+      "build",
+      "-O3",
+      "/Users/grandimam/Workspace/taraqqi/faz/examples/benchmarks/workload.mojo",
+      "-o",
+      "/Users/grandimam/Workspace/taraqqi/faz/build/benchmarks/mojo"
+    ]
+  ],
+  "run_commands": {
+    "Faz": [
+      "/Users/grandimam/Workspace/taraqqi/faz/build/benchmarks/faz"
+    ],
+    "Python": [
+      "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+      "/Users/grandimam/Workspace/taraqqi/faz/examples/benchmarks/workload.py"
+    ],
+    "Mojo": [
+      "/Users/grandimam/Workspace/taraqqi/faz/build/benchmarks/mojo"
+    ]
+  },
+  "faz_opt_level": 3,
+  "warmups": 2,
+  "runs": 9,
+  "results": {
+    "arithmetic": {
+      "n": 20000000,
+      "checksum": 877218207,
+      "languages": {
+        "Faz": {
+          "median_ms": 78.962291,
+          "min_ms": 78.830833,
+          "max_ms": 79.602625,
+          "samples_ms": [
+            79.546792,
+            79.364541,
+            78.888416,
+            79.602625,
+            79.562,
+            78.910375,
+            78.857,
+            78.962291,
+            78.830833
+          ]
+        },
+        "Python": {
+          "median_ms": 939.71725,
+          "min_ms": 926.218291,
+          "max_ms": 968.191167,
+          "samples_ms": [
+            938.159125,
+            968.191167,
+            954.982541,
+            926.218291,
+            944.3735,
+            935.600875,
+            939.71725,
+            947.000166,
+            928.741875
+          ]
+        },
+        "Mojo": {
+          "median_ms": 90.030875,
+          "min_ms": 89.094542,
+          "max_ms": 90.621833,
+          "samples_ms": [
+            89.643916,
+            89.094542,
+            90.030875,
+            90.621833,
+            89.617916,
+            89.930667,
+            90.612,
+            90.309875,
+            90.09525
+          ]
+        }
+      }
+    },
+    "sieve": {
+      "n": 3000000,
+      "checksum": 216816,
+      "languages": {
+        "Faz": {
+          "median_ms": 112.251333,
+          "min_ms": 111.64775,
+          "max_ms": 117.020958,
+          "samples_ms": [
+            111.64775,
+            111.969875,
+            112.251333,
+            112.487125,
+            112.03225,
+            111.97425,
+            112.333584,
+            117.020958,
+            116.0045
+          ]
+        },
+        "Python": {
+          "median_ms": 393.449083,
+          "min_ms": 390.749125,
+          "max_ms": 422.096708,
+          "samples_ms": [
+            393.3015,
+            400.682083,
+            394.3455,
+            393.449083,
+            392.630083,
+            391.506,
+            394.848041,
+            422.096708,
+            390.749125
+          ]
+        },
+        "Mojo": {
+          "median_ms": 21.719333,
+          "min_ms": 21.109375,
+          "max_ms": 23.102334,
+          "samples_ms": [
+            21.498625,
+            21.767292,
+            21.109375,
+            21.595875,
+            21.837709,
+            21.727834,
+            21.189875,
+            21.719333,
+            23.102334
+          ]
+        }
+      }
+    },
+    "allocation": {
+      "n": 100000,
+      "checksum": 6393600000,
+      "languages": {
+        "Faz": {
+          "median_ms": 432.88625,
+          "min_ms": 423.603625,
+          "max_ms": 440.843958,
+          "samples_ms": [
+            423.603625,
+            433.705083,
+            427.562459,
+            438.696584,
+            440.843958,
+            432.8645,
+            432.88625,
+            429.488834,
+            440.040792
+          ]
+        },
+        "Python": {
+          "median_ms": 786.083208,
+          "min_ms": 774.20125,
+          "max_ms": 801.829625,
+          "samples_ms": [
+            774.20125,
+            787.454292,
+            786.083208,
+            801.829625,
+            782.89325,
+            776.07975,
+            774.791333,
+            787.819667,
+            791.116833
+          ]
+        },
+        "Mojo": {
+          "median_ms": 66.360916,
+          "min_ms": 64.682875,
+          "max_ms": 67.543167,
+          "samples_ms": [
+            64.682875,
+            65.110042,
+            66.161042,
+            67.073083,
+            67.239291,
+            66.360916,
+            66.43975,
+            65.727958,
+            67.543167
+          ]
+        }
+      }
+    }
+  }
+}

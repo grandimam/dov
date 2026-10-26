@@ -174,12 +174,20 @@ if system == 'darwin':
         '    symbols: [ ' + ', '.join(exports) + ' ]\n...\n')
 else:
     triple = 'x86_64-linux-gnu' if arch == 'x86_64' else 'aarch64-linux-gnu'
-    for filename in ['Scrt1.o', 'crti.o', 'crtn.o', 'libc.so.6', 'libm.so.6', 'libdl.so.2']:
+    for filename in ['Scrt1.o', 'crti.o', 'crtn.o', 'libc.so.6', 'libm.so.6', 'libdl.so.2', 'libc_nonshared.a']:
         candidates = [Path(prefix) / triple / filename for prefix in ['/usr/lib', '/lib']]
         original = next((path for path in candidates if path.is_file()), None)
         if original is None:
             raise RuntimeError(f'Missing glibc link input: {filename}')
         shutil.copy2(original.resolve(), link / filename)
+        license_for(original)
+    startup = next((p for p in sorted((Path('/usr/lib/gcc') / triple).iterdir())
+                    if (p / 'crtbeginS.o').is_file() and (p / 'crtendS.o').is_file()), None)
+    if startup is None:
+        raise RuntimeError('Missing native GCC startup objects')
+    for filename in ['crtbeginS.o', 'crtendS.o']:
+        original = startup / filename
+        shutil.copy2(original, link / filename)
         license_for(original)
 
 if system == 'linux':

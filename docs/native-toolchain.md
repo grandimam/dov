@@ -27,7 +27,7 @@ The archive also carries **LLD and native link inputs**, so normal user builds
 need no separate compiler, linker, SDK, or development package. macOS uses a
 small libSystem manifest generated from Faz's own runtime declarations, with
 symbol availability checked against the packaging host; no Apple SDK files
-are copied. Linux includes glibc startup objects and link-time library inputs;
+are copied. Linux includes glibc/GCC startup objects and link-time library inputs;
 executables still load the operating system's glibc, not a private runtime.
 
 The Linux binary baseline is Ubuntu 24.04 / glibc 2.39. macOS archives target the
@@ -51,8 +51,9 @@ Developers need Clang to turn a checked-in seed into the first Faz compiler,
 plus a shared LLVM library for subsequent native builds. Install LLVM 18–22
 with its development files and set `FAZ_LLVM_HOME` to its prefix. CI exercises
 LLVM 18 on Linux and LLVM 21 on macOS. The platform linker and development files are also required for source
-bootstrap (Apple developer tools/SDK, or Linux binutils and libc development
-files).
+bootstrap (Apple developer tools/SDK, or Linux binutils, libc development
+files, and native libgcc development startup objects). No GCC executable is
+invoked during normal builds.
 
 ```sh
 # macOS example (Homebrew llvm@21 already installed):

@@ -135,6 +135,16 @@ fn object(source: str, output: str):
     if message != "":
         error(message)
 
+fn gcc_startup(multiarch: str) -> str:
+    root = "/usr/lib/gcc/" + multiarch
+    if fs.exists(root):
+        for version in fs.entries(root):
+            directory = root + "/" + version
+            if fs.exists(directory + "/crtbeginS.o") and fs.exists(directory + "/crtendS.o"):
+                return directory
+    error("GCC startup objects not found; install the native libgcc development package, or use a complete Faz archive")
+    return ""
+
 fn link(object: str, binary: str):
     args: list[str] = []
     arch = architecture()
@@ -168,16 +178,21 @@ fn link(object: str, binary: str):
                 directory = candidate
         if directory == "" or not fs.exists(loader):
             error("native glibc startup files/loader not found; install libc development files and binutils (supported: x86_64/aarch64 glibc Linux)")
-        args = ["-pie", "--eh-frame-hdr", "-dynamic-linker", loader, "-o", binary, directory + "/Scrt1.o", directory + "/crti.o", object]
+        startup = directory
+        if directory != bundle() + "/link":
+            startup = gcc_startup(multiarch)
+        args = ["-pie", "--eh-frame-hdr", "-dynamic-linker", loader, "-o", binary, directory + "/Scrt1.o", directory + "/crti.o", startup + "/crtbeginS.o", object]
         if directory == bundle() + "/link":
             args.append(directory + "/libc.so.6")
             args.append(directory + "/libm.so.6")
             args.append(directory + "/libdl.so.2")
+            args.append(directory + "/libc_nonshared.a")
         else:
             args.append("-L" + directory)
             args.append("-lc")
             args.append("-lm")
             args.append("-ldl")
+        args.append(startup + "/crtendS.o")
         args.append(directory + "/crtn.o")
     executable = linker()
     status = sys.run(executable, args)

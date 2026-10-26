@@ -1,50 +1,64 @@
 #!/usr/bin/env python3
-"""Build the standalone mascot banner: python3 tools/build-readme-hero.py.
+"""Build the README's mascot banner with Pillow.
 
-Requires Pillow. Embeds the existing mascot so GitHub need not load an external
-image from inside the SVG. No fonts, scripts, or remote resources are required.
+Run: python3 tools/build-readme-hero.py
+Optional: FAZ_FONT_REGULAR and FAZ_FONT_BOLD select TrueType font files.
 """
-import base64
-from io import BytesIO
+import os
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
+SCALE = 2
+WIDTH, HEIGHT = 1200, 540
+
+
+def font(size, bold=False):
+    override = os.environ.get("FAZ_FONT_BOLD" if bold else "FAZ_FONT_REGULAR")
+    candidates = [override] if override else []
+    candidates += [
+        "/System/Library/Fonts/Supplemental/Verdana" + (" Bold" if bold else "") + ".ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans" + ("-Bold" if bold else "") + ".ttf",
+    ]
+    for path in candidates:
+        if Path(path).is_file():
+            return ImageFont.truetype(path, size * SCALE)
+    raise SystemExit("Set FAZ_FONT_REGULAR and FAZ_FONT_BOLD to TrueType font paths.")
+
+
+# Warm paper, with a subtle peach glow behind the fox rather than a hard frame.
+image = Image.new("RGB", (WIDTH * SCALE, HEIGHT * SCALE))
+pixels = image.load()
+for y in range(image.height):
+    for x in range(image.width):
+        distance = ((x / SCALE - 920) / 620) ** 2 + ((y / SCALE - 280) / 450) ** 2
+        glow = max(0, 1 - distance) * 0.65
+        pixels[x, y] = tuple(round(a + (b - a) * glow) for a, b in zip((255, 249, 239), (249, 216, 183)))
+image = image.convert("RGBA")
+shadow = Image.new("RGBA", image.size)
+ImageDraw.Draw(shadow).ellipse((755*SCALE, 483*SCALE, 1095*SCALE, 507*SCALE), fill=(126, 70, 33, 42))
+image = Image.alpha_composite(image, shadow.filter(ImageFilter.GaussianBlur(12*SCALE)))
+
 mascot = Image.open(ROOT / "assets/faz.png").convert("RGBA")
 mascot = mascot.crop(mascot.getbbox())
-mascot.thumbnail((900, 960), Image.Resampling.LANCZOS)
-buffer = BytesIO()
-mascot.save(buffer, format="PNG", optimize=True)
-encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+mascot.thumbnail((440*SCALE, 472*SCALE), Image.Resampling.LANCZOS)
+image.alpha_composite(mascot, (int(916*SCALE - mascot.width/2), 499*SCALE - mascot.height))
 
-svg = f'''<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="title desc">
-  <title id="title">Meet Faz. Small language. Big ideas. Tiny paws.</title>
-  <desc id="desc">Faz, a curious orange fox with a big fluffy tail, welcomes you to the Faz programming language. Readable code. Native executables.</desc>
-  <defs>
-    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#141c2b"/><stop offset="1" stop-color="#292332"/></linearGradient>
-    <radialGradient id="glow"><stop stop-color="#d98145" stop-opacity=".24"/><stop offset="1" stop-color="#d98145" stop-opacity="0"/></radialGradient>
-    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#fff" stroke-opacity=".025"/></pattern>
-  </defs>
-  <rect width="1200" height="540" rx="24" fill="url(#bg)"/>
-  <rect width="1200" height="540" rx="24" fill="url(#grid)"/>
-  <ellipse cx="907" cy="269" rx="290" ry="265" fill="url(#glow)"/>
-  <circle cx="917" cy="266" r="208" fill="none" stroke="#f6b17e" stroke-opacity=".12"/>
-  <circle cx="917" cy="266" r="232" fill="none" stroke="#f6b17e" stroke-opacity=".06" stroke-dasharray="3 12"/>
-  <g font-family="Verdana, sans-serif">
-    <text x="64" y="68" fill="#f6b17e" font-size="12" letter-spacing="3">MEET YOUR NEXT SIDE PROJECT</text>
-    <text x="57" y="189" fill="#fff7ed" font-size="110" font-weight="bold" letter-spacing="-6">Faz<tspan fill="#f6b17e">.</tspan></text>
-    <g font-size="39" font-weight="bold" letter-spacing="-1">
-      <text x="64" y="263" fill="#fff7ed">Small language.</text>
-      <text x="64" y="314" fill="#fff7ed">Big ideas.</text>
-      <text x="64" y="365" fill="#f6b17e">Tiny paws.</text>
-    </g>
-    <text x="65" y="413" fill="#c5c0cc" font-size="17">Readable code. Native executables.</text>
-    <text x="65" y="493" fill="#9f9bac" font-size="11" letter-spacing="2">EXPERIMENTAL / OPEN SOURCE / SELF-HOSTED</text>
-  </g>
-  <ellipse cx="913" cy="501" rx="168" ry="13" fill="#080c16" opacity=".35"/>
-  <image x="695" y="27" width="445" height="478" preserveAspectRatio="xMidYMid meet" xlink:href="data:image/png;base64,{encoded}"/>
-</svg>
-'''
-(ROOT / "assets/readme-hero.svg").write_text(svg)
-print("Built assets/readme-hero.svg")
+draw = ImageDraw.Draw(image)
+
+def text(x, y, value, size, color, bold=False):
+    draw.text((x*SCALE, y*SCALE), value, font=font(size, bold), fill=color, anchor="lt")
+
+
+text(65, 51, "MEET YOUR NEXT SIDE PROJECT", 12, "#916247")
+text(58, 104, "Faz.", 100, "#432b23", True)
+text(65, 241, "Small language.", 37, "#432b23", True)
+text(65, 292, "Big ideas.", 37, "#432b23", True)
+text(65, 343, "Tiny paws.", 37, "#bd572d", True)
+text(66, 414, "Readable code. Native executables.", 17, "#795e50")
+text(66, 491, "EXPERIMENTAL  /  OPEN SOURCE  /  SELF-HOSTED", 10, "#916f5c")
+
+output = ROOT / "assets/faz-mascot-hero.png"
+image.convert("RGB").save(output, optimize=True)
+print(f"Built {output.relative_to(ROOT)}")

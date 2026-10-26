@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/readme-hero.svg" alt="Meet Faz, our curious fox mascot. Small language. Big ideas. Tiny paws. Readable code, native executables." width="1200" />
+  <img src="assets/faz-mascot-hero.png" alt="Meet Faz, our curious fox mascot. Small language. Big ideas. Tiny paws. Readable code, native executables." width="1200" />
 </p>
 
 <p align="center">

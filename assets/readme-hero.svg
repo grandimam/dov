@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" role="img" aria-labelledby="title desc">
+  <title id="title">Faz — Small language. Native ambition.</title>
+  <desc id="desc">Python-inspired syntax, static types, explicit mutation. A small program becomes a native executable. Experimental, open source, and self-hosted.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#171e2c"/>
+      <stop offset="1" stop-color="#292333"/>
+    </linearGradient>
+    <linearGradient id="accent" x2="1" y2="1">
+      <stop stop-color="#ffc58b"/>
+      <stop offset="1" stop-color="#ec845f"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#fff" stroke-opacity=".035"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="460" rx="24" fill="url(#background)"/>
+  <rect width="1200" height="460" rx="24" fill="url(#grid)"/>
+  <circle cx="1130" cy="50" r="230" fill="#ed986d" opacity=".035"/>
+  <circle cx="1130" cy="50" r="170" fill="none" stroke="#ed986d" stroke-opacity=".12"/>
+  <path d="M56 58h28" stroke="#f6b17e" stroke-width="4" stroke-linecap="round"/>
+  <text x="98" y="64" fill="#f6b17e" font-family="Verdana, sans-serif" font-size="13" letter-spacing="3">THE FAZ PROGRAMMING LANGUAGE</text>
+  <text x="52" y="177" fill="#fff7ed" font-family="Verdana, sans-serif" font-weight="bold" font-size="100" letter-spacing="-6">Faz<tspan fill="#f6b17e">.</tspan></text>
+  <g font-family="Verdana, sans-serif">
+    <text x="57" y="239" fill="#fff7ed" font-size="34" font-weight="bold" letter-spacing="-1">Small language.</text>
+    <text x="57" y="283" fill="url(#accent)" font-size="34" font-weight="bold" letter-spacing="-1">Native ambition.</text>
+    <text x="58" y="326" fill="#bcbac9" font-size="16">Readable programs. Visible mutation. Real binaries.</text>
+    <text x="58" y="407" fill="#a7a5b7" font-size="12" letter-spacing="2">EXPERIMENTAL  /  OPEN SOURCE  /  SELF-HOSTED</text>
+  </g>
+  <rect x="665" y="108" width="475" height="250" rx="14" fill="#101722" stroke="#3c3b4c"/>
+  <path d="M665 152h475" stroke="#303444"/>
+  <circle cx="687" cy="131" r="4" fill="#ed986d"/>
+  <circle cx="703" cy="131" r="4" fill="#e9c68a"/>
+  <circle cx="719" cy="131" r="4" fill="#b6d7a8"/>
+  <text x="1117" y="136" text-anchor="end" fill="#9b9cad" font-family="monospace" font-size="12">hello.fz</text>
+  <g font-family="monospace" font-size="19">
+    <text x="693" y="197" fill="#f5ede5"><tspan fill="#c6b4f0">fn</tspan> <tspan fill="#f6b17e">main</tspan>():</text>
+    <text x="693" y="229" xml:space="preserve" fill="#f5ede5">    print(<tspan fill="#b6d7a8">"Hello Faz!"</tspan>)</text>
+    <text x="693" y="291" fill="#bcbac9"><tspan fill="#f6b17e">$</tspan> faz build hello.fz -o hello</text>
+    <text x="693" y="326" fill="#b6d7a8"><tspan fill="#f6b17e">$</tspan> ./hello</text>
+  </g>
+  <path d="M902 359v29h30" fill="none" stroke="#b6d7a8" stroke-opacity=".6"/>
+  <circle cx="937" cy="388" r="3" fill="#b6d7a8"/>
+  <text x="950" y="393" fill="#b6d7a8" font-family="monospace" font-size="13">No Faz runtime install.</text>
+</svg>

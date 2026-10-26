@@ -1,12 +1,9 @@
 <p align="center">
-  <img src="assets/faz.png" alt="Faz, the fox mascot" width="240" />
+  <img src="assets/readme-hero.svg" alt="Faz — Small language. Native ambition. Readable programs, visible mutation, real binaries." width="1200" />
 </p>
 
-<h1 align="center">Small language. Big ideas. Tiny paws.</h1>
-
 <p align="center">
-  <strong>Meet Faz — readable little programs that become native executables.</strong><br />
-  Python-inspired syntax. Static types. Explicit mutation. Automatic garbage collection.
+  <strong>Python-inspired syntax · Static types · Explicit mutation · Automatic garbage collection</strong>
 </p>
 
 <p align="center">
@@ -25,11 +22,17 @@
 
 ---
 
-## Familiar at first glance. Explicit where it matters.
+## Less ceremony. More making.
 
-Faz is an **experimental language for small tools and language experiments**.
-Write readable `.fz` files, check them before execution, and build native programs
-with LLVM inside the compiler. No Faz interpreter needed to run the result.
+**Write a small program. Turn it into a real executable.** Faz pairs familiar,
+indentation-based syntax with static checking and an LLVM-powered native compiler.
+Mutation is explicit. Memory is garbage-collected. The resulting binary runs
+without a Faz installation, using your operating system's libraries.
+
+Built for **small tools and language experiments**—not a drop-in replacement for
+Python, and not production-stable yet.
+
+### Familiar at first glance. Explicit where it matters.
 
 ```python
 fn main():
@@ -233,7 +236,9 @@ supported behavior.
 ---
 
 <p align="center">
-  <strong>Make something small. See where it goes.</strong><br /><br />
+  <img src="assets/faz.png" alt="Faz, our resident fox mascot" width="140" /><br />
+  <strong>Small language. Big ideas. Tiny paws.</strong><br />
+  Make something small. See where it goes.<br /><br />
   <a href="#try-it">Try Faz</a> &nbsp;·&nbsp;
   <a href="examples/README.md">Find an example</a> &nbsp;·&nbsp;
   <a href="https://github.com/grandimam/faz/issues">Share a bug or an idea</a><br /><br />

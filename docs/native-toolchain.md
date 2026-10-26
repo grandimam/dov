@@ -6,7 +6,7 @@ the platform linker with that object. Normal `build` and `run` never launch
 Clang, `cc`, `llc`, or an external optimizer. The generated executable does not
 load LLVM or require Faz. It still uses the operating system's libraries.
 
-## Install a staged distribution
+## Install a binary release
 
 A native distribution has `bin/faz`, `lib/faz/llvm/lib`, third-party notices,
 platform metadata, and a checksum manifest. Keep the archive together:
@@ -20,8 +20,8 @@ faz build hello.fz -o hello
 
 The installer copies the backend and its notices along with the compiler.
 There is no separate LLVM or Clang installation for this distribution. Archive
-staging is implemented and exercised in CI; this repository does not yet
-publish versioned binary releases. CI validates staging; binary artifacts are not published.
+staging and installation are exercised in CI. See [installation instructions](install.md)
+for the v0.1.0 downloads and supported system versions.
 
 The archive also carries **LLD and native link inputs**, so normal user builds
 need no separate compiler, linker, SDK, or development package. macOS uses a
@@ -30,9 +30,8 @@ symbol availability checked against the packaging host; no Apple SDK files
 are copied. Linux includes glibc/GCC startup objects and link-time library inputs;
 executables still load the operating system's glibc, not a private runtime.
 
-The Linux binary baseline is Ubuntu 24.04 / glibc 2.39. macOS archives target the
-packaging host's architecture and dependency compatibility; the manifest records
-that build OS. Native x86-64 and AArch64 are supported by the backend, but each
+The Linux binary baseline is Ubuntu 24.04 / glibc 2.39. The v0.1.0 macOS archive targets Apple Silicon on macOS 26 or newer, as required
+by its bundled LLVM/LLD builds; the manifest also records the build OS. Native x86-64 and AArch64 are supported by the backend, but each
 archive must be built and tested on its intended platform. Cross-compilation,
 Windows, and musl are not supported. Faz's existing Linux context-switch runtime
 assumes the glibc ABI.

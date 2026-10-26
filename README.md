@@ -39,6 +39,54 @@ weekend tool
 2 steps ready
 ```
 
+## Try it
+
+**Install Faz once. Run and build immediately.** The package includes LLVM,
+LLD, and native link inputs—no separate compiler, linker, SDK, or development
+packages for normal use.
+
+| Package | Supported system |
+| :--- | :--- |
+| macOS ARM64 | Apple Silicon, macOS 26 or newer |
+| Linux x86-64 | glibc 2.39 or newer, such as Ubuntu 24.04; not musl/Alpine |
+
+Paste this one command in your terminal:
+
+```sh
+curl -fsSL https://github.com/grandimam/faz/releases/download/v0.1.0/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
+```
+
+The installer detects your platform, verifies the archive's pinned SHA-256,
+installs without `sudo`, and compiles a smoke test before switching versions.
+The final `export` activates Faz in this terminal. Shell profiles and security
+settings stay unchanged. See the install guide to inspect the script first or
+choose another prefix.
+[Manual downloads, checksums, and installation details →](docs/install.md)
+
+Save a first program and run it:
+
+```sh
+cat > hello.fz <<'FZ'
+fn main():
+    print("Hello Faz!")
+FZ
+faz run hello.fz
+# Hello Faz!
+faz build hello.fz -o hello
+./hello
+# Hello Faz!
+```
+
+`faz check hello.fz` checks without compiling; `faz emit-llvm hello.fz -o hello.ll`
+shows the generated IR. Built programs run without Faz, using the OS libraries.
+Python packages do not run in Faz.
+
+The macOS archive is ad-hoc signed, **not Apple-notarized**. A browser download
+may trigger Gatekeeper; the installer does not bypass it. See [installation
+notes](docs/install.md#macos-security-prompts) before changing any settings.
+Building Faz itself is a separate developer workflow: [source build and native
+toolchain details](docs/native-toolchain.md#source-development).
+
 <table>
   <tr>
     <td width="33%" valign="top"><strong>Readable by design</strong><br /><br />Indentation, inferred locals, typed functions, lists, and structs. A small syntax for small programs.</td>
@@ -48,62 +96,6 @@ weekend tool
 </table>
 
 > **Early-stage software.** Syntax and APIs can change. The new core rules are the default; the compiler itself and parts of the older example corpus still use an explicit legacy dialect. See [current boundaries](#current-boundaries) before building on Faz.
-
-## Try it
-
-A staged distribution installs Faz, LLVM, LLD, and native link inputs together: one
-`faz run` or `faz build` command, with no separate LLVM/Clang installation.
-[Distribution staging and remaining platform requirements](docs/native-toolchain.md)
-are documented; versioned binary releases are not published yet. The archive
-uses the operating system’s runtime libraries, with no separate compiler or SDK
-installation for normal user builds. See the tested OS baselines before staging
-a distribution.
-
-**Build from source today.** Developers need Git, Clang for the initial seed,
-and LLVM's shared library (18–22). Set `FAZ_LLVM_HOME` to your LLVM prefix—for
-example `$(brew --prefix llvm@21)` on macOS or `/usr/lib/llvm-18` on Ubuntu.
-
-```sh
-git clone https://github.com/grandimam/faz.git
-cd faz
-```
-
-Build the included seed for your platform:
-
-| Platform | Command |
-| :--- | :--- |
-| macOS · Apple Silicon | `clang -x ir -O2 -Wno-override-module bootstrap/seed-darwin.ll -o faz` |
-| Linux | `clang -x ir -O2 -Wno-override-module bootstrap/seed-linux.ll -o faz` |
-
-```sh
-./faz run examples/hello.fz
-# Hello Faz!
-```
-
-**Now make it yours.** Save the opening example as `hello.fz` in the checkout:
-
-```sh
-./faz check hello.fz                  # Check without native compilation.
-./faz run hello.fz                    # Compile and run.
-./faz build hello.fz -o build/hello    # Keep the executable.
-./build/hello                         # Run it directly.
-./faz emit-llvm hello.fz -o hello.ll   # Inspect the generated LLVM IR.
-```
-
-`build` and `run` load LLVM in-process and invoke the native linker. `check` and `emit-llvm` need neither. See [native toolchain configuration](docs/native-toolchain.md) for overrides and diagnostics. This is a separate language—Python packages do not run in Faz.
-
-<details>
-<summary><strong>Put Faz on your PATH</strong></summary>
-
-```sh
-./faz install "$HOME/.local"
-export PATH="$HOME/.local/bin:$PATH"
-faz --version
-```
-
-Add the `export` line to your shell configuration to keep it available in future sessions. The installed compiler includes its runtime and does not need this checkout. Installing from a staged distribution also copies LLVM; a source-built installation uses your developer LLVM configuration.
-
-</details>
 
 ## Keep the original. Change the copy.
 

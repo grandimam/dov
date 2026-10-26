@@ -1,0 +1,49 @@
+name: Validate downloaded release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux-install:
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download the actual release assets
+        run: |
+          mkdir -p build/release-download
+          if [ "$(gh release view v0.1.0 --json isDraft --jq .isDraft)" = true ]; then
+            gh release download v0.1.0 --dir build/release-download --pattern faz-v0.1.0-linux-x86_64.tar.gz --pattern install.sh --pattern SHA256SUMS
+          else
+            for asset in faz-v0.1.0-linux-x86_64.tar.gz install.sh SHA256SUMS; do
+              curl -fL "https://github.com/grandimam/faz/releases/download/v0.1.0/$asset" -o "build/release-download/$asset"
+            done
+          fi
+          cmp install.sh build/release-download/install.sh
+          cd build/release-download
+          grep -E '  (faz-v0.1.0-linux-x86_64.tar.gz|install.sh)$' SHA256SUMS | sha256sum -c -
+      - name: Test installer reruns and failure preservation
+        run: python3 tools/test-installer.py build/release-download/faz-v0.1.0-linux-x86_64.tar.gz
+      - name: Install and run in a clean OS without developer packages
+        run: |
+          mkdir -p build/release-download/transport
+          cat > build/release-download/transport/curl <<'SH'
+          #!/bin/sh
+          set -eu
+          while [ "$#" -gt 0 ]; do
+            if [ "$1" = --output ]; then cp /release/faz-v0.1.0-linux-x86_64.tar.gz "$2"; exit; fi
+            shift
+          done
+          exit 1
+          SH
+          chmod +x build/release-download/transport/curl
+          docker run --rm -v "$PWD/build/release-download:/release:ro" ubuntu:24.04 sh -eu -c '
+            export PATH=/release/transport:/usr/bin:/bin
+            sh /release/install.sh --prefix "/tmp/Faz install"
+            export PATH="/tmp/Faz install/bin:$PATH"
+            printf "fn main():\n    print(42)\n" > /tmp/hello.fz
+            faz run /tmp/hello.fz
+            faz build /tmp/hello.fz -o /tmp/hello
+            /tmp/hello
+          '

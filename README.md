@@ -1,9 +1,10 @@
 <p align="center">
-  <img src="assets/readme-hero.svg" alt="Faz — Small language. Native ambition. Readable programs, visible mutation, real binaries." width="1200" />
+  <img src="assets/readme-hero.svg" alt="Meet Faz, our curious fox mascot. Small language. Big ideas. Tiny paws. Readable code, native executables." width="1200" />
 </p>
 
 <p align="center">
-  <strong>Python-inspired syntax · Static types · Explicit mutation · Automatic garbage collection</strong>
+  <strong>A curious fox. A small language. Your next side project.</strong><br />
+  Python-inspired syntax · Static types · Explicit mutation · Automatic garbage collection
 </p>
 
 <p align="center">

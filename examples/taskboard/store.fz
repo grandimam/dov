@@ -1,0 +1,59 @@
+import text
+
+struct Task:
+    id: int
+    priority: int
+    done: bool
+    title: str
+
+fn load(path: str) -> list[Task]:
+    mut tasks: list[Task] = []
+    mut content = "faz-taskboard-v1\n"
+    if fs.exists(path):
+        content = fs.read_text(path)
+    lines = text.split(content, "\n")
+    if lines[0] != "faz-taskboard-v1":
+        text.fail("unrecognized database header: " + path)
+    mut previous = 0
+    for index in range(1, len(lines)):
+        line = lines[index]
+        if line == "" and index == len(lines) - 1:
+            continue
+        fields = text.split(line, "\t")
+        if len(fields) != 4:
+            text.fail("invalid database row " + str(index + 1))
+        id = text.natural(fields[0])
+        priority = text.natural(fields[1])
+        if id <= previous or priority < 1 or priority > 3:
+            text.fail("invalid ID order or priority in database")
+        if fields[2] != "0" and fields[2] != "1":
+            text.fail("invalid completion flag in database")
+        if not text.valid_title(fields[3]):
+            text.fail("invalid title in database")
+        tasks.append(Task(id, priority, fields[2] == "1", fields[3]))
+        previous = id
+    return tasks
+
+fn save(path: str, tasks: list[Task]):
+    mut rows = ["faz-taskboard-v1"]
+    for item in tasks:
+        mut done = "0"
+        if item.done:
+            done = "1"
+        rows.append(str(item.id) + "\t" + str(item.priority) + "\t" + done + "\t" + item.title)
+    fs.write_text(path, str.join(rows, "\n") + "\n")
+
+fn next_id(tasks: list[Task]) -> int:
+    if len(tasks) == 0:
+        return 1
+    id = tasks[len(tasks) - 1].id + 1
+    if id > 999999999:
+        text.fail("task ID limit reached")
+    return id
+
+fn set_done(mut tasks: list[Task], id: int, done: bool):
+    for index in range(len(tasks)):
+        if tasks[index].id == id:
+            tasks[index].done = done
+            return
+    text.fail("no task with ID " + str(id))

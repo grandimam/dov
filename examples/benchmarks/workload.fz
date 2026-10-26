@@ -1,0 +1,55 @@
+# Identical algorithms and signed 64-bit arithmetic in Faz, Rust, and Go.
+fn integer(value: str) -> int:
+    mut result = 0
+    for index in range(len(value)):
+        result = result * 10 + str.byte_at(value, index) - 48
+    return result
+
+fn arithmetic(n: int) -> int:
+    mut a = 0
+    mut b = 1
+    for index in range(n):
+        next = (a + b) % 1000000007
+        a = b
+        b = next
+    return a
+
+fn sieve(n: int) -> int:
+    mut composite: list[int] = []
+    for index in range(n + 1):
+        composite.append(0)
+    mut p = 2
+    while p * p <= n:
+        if composite[p] == 0:
+            mut multiple = p * p
+            while multiple <= n:
+                composite[multiple] = 1
+                multiple += p
+        p += 1
+    mut count = 0
+    for index in range(2, n + 1):
+        if composite[index] == 0:
+            count += 1
+    return count
+
+fn allocation(n: int) -> int:
+    mut checksum = 0
+    for batch in range(n):
+        mut values: list[int] = []
+        for index in range(128):
+            values.append((batch + index) % 1000)
+        for value in values:
+            checksum += value
+    return checksum
+
+fn main():
+    args = sys.args()
+    n = integer(args[1])
+    if args[0] == "arithmetic":
+        print(arithmetic(n))
+    elif args[0] == "sieve":
+        print(sieve(n))
+    elif args[0] == "allocation":
+        print(allocation(n))
+    else:
+        sys.exit(1)

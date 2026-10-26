@@ -1,0 +1,205 @@
+{
+  "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "cpu": "Apple M2 Pro",
+  "versions": {
+    "faz": "faz 0.1.0",
+    "rust": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "go": "go version go1.22.3 darwin/arm64"
+  },
+  "commands": {
+    "faz": [
+      "/Users/grandimam/.local/bin/faz",
+      "build",
+      "/Users/grandimam/Workspace/taraqqi/faz/examples/benchmarks/workload.fz",
+      "-o",
+      "/Users/grandimam/Workspace/taraqqi/faz/build/benchmarks/faz"
+    ],
+    "rust": [
+      "rustc",
+      "-C",
+      "opt-level=3",
+      "/Users/grandimam/Workspace/taraqqi/faz/examples/benchmarks/workload.rs",
+      "-o",
+      "/Users/grandimam/Workspace/taraqqi/faz/build/benchmarks/rust"
+    ],
+    "go": [
+      "go",
+      "build",
+      "-o",
+      "/Users/grandimam/Workspace/taraqqi/faz/build/benchmarks/go",
+      "/Users/grandimam/Workspace/taraqqi/faz/examples/benchmarks/workload.go"
+    ]
+  },
+  "faz_opt_level": 3,
+  "warmups": 2,
+  "runs": 9,
+  "binary_bytes": {
+    "faz": 114144,
+    "rust": 462568,
+    "go": 2046962
+  },
+  "results": {
+    "arithmetic": {
+      "n": 20000000,
+      "checksum": 877218207,
+      "languages": {
+        "faz": {
+          "median_ms": 78.468084,
+          "min_ms": 78.287959,
+          "max_ms": 83.3885,
+          "samples_ms": [
+            78.287959,
+            78.468084,
+            78.499208,
+            78.418584,
+            78.456125,
+            78.422542,
+            83.3885,
+            79.448458,
+            79.600167
+          ]
+        },
+        "rust": {
+          "median_ms": 66.413833,
+          "min_ms": 66.231167,
+          "max_ms": 70.447834,
+          "samples_ms": [
+            66.413833,
+            66.364333,
+            67.152042,
+            66.231167,
+            66.267167,
+            66.659833,
+            66.268541,
+            70.447834,
+            66.758166
+          ]
+        },
+        "go": {
+          "median_ms": 67.179958,
+          "min_ms": 66.793542,
+          "max_ms": 70.058125,
+          "samples_ms": [
+            67.690625,
+            66.894542,
+            67.179958,
+            66.900042,
+            67.152,
+            66.793542,
+            69.733416,
+            70.058125,
+            67.90025
+          ]
+        }
+      }
+    },
+    "sieve": {
+      "n": 3000000,
+      "checksum": 216816,
+      "languages": {
+        "faz": {
+          "median_ms": 112.677833,
+          "min_ms": 111.569417,
+          "max_ms": 113.084708,
+          "samples_ms": [
+            112.420416,
+            112.9775,
+            112.677833,
+            112.971708,
+            113.084708,
+            111.569417,
+            112.84975,
+            111.904958,
+            112.182042
+          ]
+        },
+        "rust": {
+          "median_ms": 17.269042,
+          "min_ms": 16.622209,
+          "max_ms": 17.653958,
+          "samples_ms": [
+            17.269042,
+            17.471167,
+            17.077917,
+            17.324708,
+            17.153041,
+            17.350167,
+            17.149167,
+            16.622209,
+            17.653958
+          ]
+        },
+        "go": {
+          "median_ms": 22.704542,
+          "min_ms": 22.090334,
+          "max_ms": 24.030167,
+          "samples_ms": [
+            23.186292,
+            22.681958,
+            24.030167,
+            22.256792,
+            22.729875,
+            22.717125,
+            22.605833,
+            22.090334,
+            22.704542
+          ]
+        }
+      }
+    },
+    "allocation": {
+      "n": 100000,
+      "checksum": 6393600000,
+      "languages": {
+        "faz": {
+          "median_ms": 431.521084,
+          "min_ms": 427.740792,
+          "max_ms": 432.939125,
+          "samples_ms": [
+            427.740792,
+            429.827959,
+            432.939125,
+            432.90625,
+            429.345458,
+            432.793708,
+            431.521084,
+            432.762625,
+            430.913875
+          ]
+        },
+        "rust": {
+          "median_ms": 34.786625,
+          "min_ms": 34.503625,
+          "max_ms": 35.58925,
+          "samples_ms": [
+            34.675833,
+            34.853541,
+            34.69375,
+            34.674417,
+            34.786625,
+            35.48175,
+            35.58925,
+            35.012833,
+            34.503625
+          ]
+        },
+        "go": {
+          "median_ms": 45.498542,
+          "min_ms": 42.919042,
+          "max_ms": 48.068875,
+          "samples_ms": [
+            46.74825,
+            45.498542,
+            44.628792,
+            42.919042,
+            43.981208,
+            46.048083,
+            45.097916,
+            47.359834,
+            48.068875
+          ]
+        }
+      }
+    }
+  }
+}

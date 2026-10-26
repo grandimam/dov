@@ -1,0 +1,42 @@
+# Small parsing helpers: no Python libraries or legacy dialect required.
+fn fail(message: str):
+    sys.error("taskboard: " + message)
+    sys.exit(1)
+
+fn natural(value: str) -> int:
+    if len(value) == 0 or len(value) > 9:
+        fail("expected an integer from 0 to 999999999: " + value)
+    mut result = 0
+    digits = "0123456789"
+    for character in value:
+        mut digit = -1
+        for index in range(10):
+            if character == digits[index]:
+                digit = index
+        if digit < 0:
+            fail("invalid integer: " + value)
+        result = result * 10 + digit
+    return result
+
+fn split(value: str, separator: str) -> list[str]:
+    mut parts: list[str] = []
+    mut current = ""
+    for character in value:
+        if character == separator:
+            parts.append(current)
+            current = ""
+        else:
+            current = current + character
+    parts.append(current)
+    return parts
+
+fn valid_title(title: str) -> bool:
+    if len(title) == 0:
+        return False
+    mut visible = False
+    for character in title:
+        if character == "\t" or character == "\n" or character == "\r":
+            return False
+        if character != " ":
+            visible = True
+    return visible

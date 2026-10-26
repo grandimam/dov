@@ -1,0 +1,78 @@
+import text
+import store
+
+fn usage():
+    print("Taskboard - persistent tasks in native Faz")
+    print("Usage: taskboard DATABASE COMMAND [ARGUMENTS]")
+    print("  add PRIORITY TITLE   priority: 1 (high), 2, or 3 (low)")
+    print("  list [open|done|all]  ordered by priority, then ID")
+    print("  done ID | reopen ID")
+    print("  search TEXT          case-sensitive title search")
+    print("  stats")
+
+fn show(tasks: list[store.Task], filter: str, query: str):
+    mut count = 0
+    for priority in range(1, 4):
+        for item in tasks:
+            selected = filter == "all" or (filter == "done" and item.done) or (filter == "open" and not item.done)
+            if selected and item.priority == priority and str.contains(item.title, query):
+                mut mark = "[ ]"
+                if item.done:
+                    mark = "[x]"
+                print(mark, "#" + str(item.id), "P" + str(item.priority), item.title)
+                count += 1
+    print(str(count) + " task(s)")
+
+fn stats(tasks: list[store.Task]):
+    mut completed = 0
+    mut urgent = 0
+    for item in tasks:
+        if item.done:
+            completed += 1
+        elif item.priority == 1:
+            urgent += 1
+    print("Total:", len(tasks))
+    print("Open:", len(tasks) - completed)
+    print("Completed:", completed)
+    print("High-priority open:", urgent)
+    if len(tasks) > 0:
+        print("Completion:", completed * 100 // len(tasks), "%")
+
+fn main():
+    args = sys.args()
+    if len(args) == 0:
+        usage()
+        return
+    if len(args) < 2:
+        text.fail("expected a database path and command")
+    path = args[0]
+    command = args[1]
+    mut tasks = store.load(path)
+    if command == "add" and len(args) == 4:
+        priority = text.natural(args[2])
+        if priority < 1 or priority > 3:
+            text.fail("priority must be 1, 2, or 3")
+        if not text.valid_title(args[3]):
+            text.fail("title must be nonblank and contain no tabs or newlines")
+        id = store.next_id(tasks)
+        tasks.append(store.Task(id, priority, False, args[3]))
+        store.save(path, tasks)
+        print("Added #" + str(id))
+    elif command == "list" and (len(args) == 2 or len(args) == 3):
+        mut filter = "open"
+        if len(args) == 3:
+            filter = args[2]
+        if filter != "open" and filter != "done" and filter != "all":
+            text.fail("list filter must be open, done, or all")
+        show(tasks, filter, "")
+    elif (command == "done" or command == "reopen") and len(args) == 3:
+        store.set_done(tasks, text.natural(args[2]), command == "done")
+        store.save(path, tasks)
+        print("Updated #" + args[2])
+    elif command == "search" and len(args) == 3:
+        show(tasks, "all", args[2])
+    elif command == "stats" and len(args) == 2:
+        stats(tasks)
+    else:
+        usage()
+        text.fail("unknown command or wrong argument count")

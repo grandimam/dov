@@ -1,0 +1,37 @@
+# A small budget report using structs, typed functions, and explicit copies.
+# Amounts are whole dollars to keep the example focused on core syntax.
+struct Expense:
+    name: str
+    amount: int
+
+fn total(expenses: list[Expense]) -> int:
+    mut result = 0
+    for expense in expenses:
+        result += expense.amount
+    return result
+
+fn report(title: str, expenses: list[Expense], budget: int):
+    print(title)
+    for expense in expenses:
+        print("-", expense.name, "$", expense.amount)
+    spent = total(expenses)
+    print("Total: $", spent)
+    if spent <= budget:
+        print("Remaining: $", budget - spent)
+    else:
+        print("Over budget: $", spent - budget)
+
+fn main():
+    budget = 100
+    original = [Expense("Groceries", 45), Expense("Transport", 20)]
+
+    # Deep-copy the list so adding a purchase leaves the original unchanged.
+    mut planned = copy(original)
+    planned.append(Expense("Books", 40))
+
+    report("Current spending", original, budget)
+    print("")
+    report("With planned purchase", planned, budget)
+    print("")
+    print("Original entries:", len(original))
+    print("Planned entries:", len(planned))

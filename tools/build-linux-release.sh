@@ -4,6 +4,9 @@ set -eu
 export DEBIAN_FRONTEND=noninteractive
 sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
 apt-get update
+# Base-image libraries may predate the source indexes. Upgrade before staging
+# so every copied binary has an available exact source version.
+apt-get upgrade -y
 apt-get install -y --no-install-recommends ca-certificates git clang-18 llvm-18-dev lld-18 patchelf python3 binutils libc6-dev libgcc-13-dev dpkg-dev xz-utils
 mkdir -p /work /out
 git -c safe.directory=/source -C /source archive HEAD > /work/faz-source.tar

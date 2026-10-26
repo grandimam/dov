@@ -11,6 +11,14 @@ struct Binding:
     code: str
     ty: str
 
+struct Place:
+    address: str
+    ty: str
+    kind: str
+    base: str
+    index: str
+    loc: str
+
 struct Loop:
     stop: str
     again: str
@@ -21,6 +29,7 @@ struct Module:
     globals: list[str]
     declarations: list[str]
     helpers: list[str]
+    helper_names: list[str]
     next: int
     library: bool
     bundled: bool
@@ -313,6 +322,305 @@ fn raw_builtin(g: Generator, n: syntax.Node) -> Value:
     semantic.fail(n, "unknown raw intrinsic '" + name + "'")
     return Value("0", "None")
 
+# Type-specialized helpers recurse over values, never allocation identity.
+fn value_helper(m: Module, ty: str, copying: bool) -> str:
+    key = "eq:" + ty
+    if copying:
+        key = "copy:" + ty
+    for i in range(len(m.helper_names)):
+        if m.helper_names[i] == key:
+            return "jv_value_" + str(i)
+    name = "jv_value_" + str(len(m.helper_names))
+    m.helper_names.append(key)
+    result_type = "bool"
+    if copying:
+        result_type = ty
+    g = Generator(m, [], [], [], [], [], [], [], 0, result_type, False)
+    left = value(g, "%arg0", ty)
+    right = Value("0", ty)
+    params = ["i64 %arg0", "i64 %arg1"]
+    if copying:
+        params = ["i64 %arg0"]
+    else:
+        right = value(g, "%arg1", ty)
+    output = slot(g, result_type)
+    if not copying:
+        store(g, output, "1")
+    done = label(g)
+    if semantic.list_type(ty):
+        element_type = semantic.element(ty)
+        count = call(g, "rt_list_len", [left.code], "int")
+        if copying:
+            managed = "0"
+            if semantic.managed(element_type):
+                managed = "1"
+            destination = call(g, "rt_list_new", [managed, "0"], ty)
+            store(g, output, destination.code)
+        else:
+            other_count = call(g, "rt_list_len", [right.code], "int")
+            same_length = instruction(g, "icmp eq i64 " + count.code + ", " + other_count.code)
+            proceed = label(g)
+            mismatch = label(g)
+            line(g, "  br i1 " + same_length + ", label %" + proceed + ", label %" + mismatch)
+            mark(g, mismatch)
+            store(g, output, "0")
+            jump(g, done)
+            mark(g, proceed)
+        cursor = slot(g, "int")
+        store(g, cursor, "0")
+        test = label(g)
+        body = label(g)
+        jump(g, test)
+        mark(g, test)
+        index = load(g, cursor)
+        more = instruction(g, "icmp slt i64 " + index + ", " + count.code)
+        line(g, "  br i1 " + more + ", label %" + body + ", label %" + done)
+        mark(g, body)
+        item = call(g, "rt_list_get", [left.code, index, "0"], element_type)
+        if copying:
+            cloned = copy_value(g, item)
+            unused = call(g, "rt_list_append", [load(g, output), cloned.code, "0"], "None")
+        else:
+            other = call(g, "rt_list_get", [right.code, index, "0"], element_type)
+            equal = equal_value(g, item, other)
+            store(g, output, equal.code)
+            advance = label(g)
+            branch(g, equal.code, advance, done)
+            mark(g, advance)
+        next_index = instruction(g, "add i64 " + index + ", 1")
+        store(g, cursor, next_index)
+        jump(g, test)
+    else:
+        declaration = m.program.declarations[semantic.declaration(m.program, ty)]
+        tag = call(g, "rt_object_tag", [left.code], "int")
+        if not copying:
+            other_tag = call(g, "rt_object_tag", [right.code], "int")
+            same_tag = instruction(g, "icmp eq i64 " + tag.code + ", " + other_tag.code)
+            proceed = label(g)
+            mismatch = label(g)
+            line(g, "  br i1 " + same_tag + ", label %" + proceed + ", label %" + mismatch)
+            mark(g, mismatch)
+            store(g, output, "0")
+            jump(g, done)
+            mark(g, proceed)
+        variants = [declaration]
+        if declaration.kind == "enum":
+            variants = declaration.children
+        for vi in range(len(variants)):
+            variant = variants[vi]
+            next_variant = label(g)
+            if declaration.kind == "enum":
+                body = label(g)
+                matches = instruction(g, "icmp eq i64 " + tag.code + ", " + str(vi))
+                line(g, "  br i1 " + matches + ", label %" + body + ", label %" + next_variant)
+                mark(g, body)
+            if copying:
+                mask = ""
+                for field_type in variant.types:
+                    if semantic.managed(field_type):
+                        mask = mask + "1"
+                    else:
+                        mask = mask + "0"
+                destination = call(g, "rt_object_new", [tag.code, str(len(variant.types)), literal(m, mask), "0"], ty)
+                store(g, output, destination.code)
+            for i in range(len(variant.types)):
+                item = call(g, "rt_object_get", [left.code, str(i)], variant.types[i])
+                if copying:
+                    cloned = copy_value(g, item)
+                    unused = call(g, "rt_object_set", [load(g, output), str(i), cloned.code], "None")
+                else:
+                    other = call(g, "rt_object_get", [right.code, str(i)], variant.types[i])
+                    equal = equal_value(g, item, other)
+                    store(g, output, equal.code)
+                    next_field = label(g)
+                    branch(g, equal.code, next_field, done)
+                    mark(g, next_field)
+            jump(g, done)
+            if declaration.kind == "enum":
+                mark(g, next_variant)
+        if declaration.kind == "enum":
+            unused = call(g, "rt_panic", ["0", literal(m, "invalid enum tag")], "None")
+            line(g, "  unreachable")
+    mark(g, done)
+    result = load(g, output)
+    unused = call(g, "rt_roots_leave", ["%frame"], "None")
+    line(g, "  ret i64 " + result)
+    m.helpers.append(render_function(g, name, params))
+    return name
+
+fn copy_value(g: Generator, original: Value) -> Value:
+    if original.ty == "int" or original.ty == "bool" or original.ty == "str" or original.ty == "None":
+        return original
+    helper = value_helper(g.module, original.ty, True)
+    return value(g, instruction(g, "call i64 @" + helper + "(i64 " + original.code + ")"), original.ty)
+
+fn equal_value(g: Generator, left: Value, right: Value) -> Value:
+    if left.ty == "str":
+        compared = call(g, "rt_string_compare", [left.code, right.code], "int")
+        test = instruction(g, "icmp eq i64 " + compared.code + ", 0")
+        return Value(instruction(g, "zext i1 " + test + " to i64"), "bool")
+    if left.ty == "int" or left.ty == "bool" or left.ty == "None":
+        test = instruction(g, "icmp eq i64 " + left.code + ", " + right.code)
+        return Value(instruction(g, "zext i1 " + test + " to i64"), "bool")
+    helper = value_helper(g.module, left.ty, False)
+    return Value(instruction(g, "call i64 @" + helper + "(i64 " + left.code + ", i64 " + right.code + ")"), "bool")
+
+# Lvalue evaluation is performed exactly once, before evaluating the RHS/call.
+fn place(g: Generator, n: syntax.Node) -> Place:
+    if n.kind == "name":
+        i = position(g.locals, n.text)
+        return Place(g.locals[i].code, g.locals[i].ty, "local", "0", "0", str(n.line))
+    base = expression(g, n.children[0], "")
+    index = "0"
+    ty = ""
+    kind = "field"
+    if n.kind == "field":
+        i = field_index(g, base.ty, n.text)
+        index = str(i)
+        d = g.module.program.declarations[semantic.declaration(g.module.program, base.ty)]
+        ty = d.types[i]
+    else:
+        index = expression(g, n.children[1], "int").code
+        ty = semantic.element(base.ty)
+        kind = "index"
+    address = slot(g, ty)
+    current = Value("0", ty)
+    if kind == "field":
+        current = call(g, "rt_object_get", [base.code, index], ty)
+    else:
+        current = call(g, "rt_list_get", [base.code, index, str(n.line)], ty)
+    store(g, address, current.code)
+    return Place(address, ty, kind, base.code, index, str(n.line))
+
+fn finish_place(g: Generator, target: Place):
+    if target.kind == "field":
+        unused = call(g, "rt_object_set", [target.base, target.index, load(g, target.address)], "None")
+    elif target.kind == "index":
+        unused = call(g, "rt_list_set", [target.base, target.index, load(g, target.address), target.loc], "None")
+
+fn invoke(g: Generator, n: syntax.Node, target: syntax.Node) -> Value:
+    args: list[str] = []
+    writes: list[Place] = []
+    for i in range(len(n.children)):
+        if semantic.has(target.mutable_names, target.names[i]):
+            location = place(g, n.children[i])
+            args.append(instruction(g, "ptrtoint ptr " + location.address + " to i64"))
+            writes.append(location)
+        else:
+            args.append(expression(g, n.children[i], target.types[i]).code)
+    result = value(g, instruction(g, "call i64 @" + symbol(g.module, n.text) + "(" + arguments(args) + ")"), target.type_name)
+    for location in writes:
+        finish_place(g, location)
+    return result
+
+fn print_text(g: Generator, text: str):
+    unused = call(g, "rt_print", [literal(g.module, text), "2"], "None")
+
+fn print_value(g: Generator, item: Value, nested: bool):
+    if item.ty == "int":
+        unused = call(g, "rt_print", [item.code, "0"], "None")
+    elif item.ty == "bool":
+        unused = call(g, "rt_print", [item.code, "1"], "None")
+    elif item.ty == "str" and not nested:
+        unused = call(g, "rt_print", [item.code, "2"], "None")
+    else:
+        helper = print_helper(g.module, item.ty)
+        unused_code = instruction(g, "call i64 @" + helper + "(i64 " + item.code + ")")
+
+fn print_helper(m: Module, ty: str) -> str:
+    key = "print:" + ty
+    for i in range(len(m.helper_names)):
+        if m.helper_names[i] == key:
+            return "jv_value_" + str(i)
+    name = "jv_value_" + str(len(m.helper_names))
+    m.helper_names.append(key)
+    g = Generator(m, [], [], [], [], [], [], [], 0, "None", False)
+    original = value(g, "%arg0", ty)
+    done = label(g)
+    if semantic.list_type(ty) or ty == "str":
+        count = Value("0", "int")
+        if ty == "str":
+            print_text(g, "\"")
+            count = call(g, "rt_string_len", [original.code, "0"], "int")
+        else:
+            print_text(g, "[")
+            count = call(g, "rt_list_len", [original.code], "int")
+        cursor = slot(g, "int")
+        store(g, cursor, "0")
+        test = label(g)
+        body = label(g)
+        jump(g, test)
+        mark(g, test)
+        index = load(g, cursor)
+        more = instruction(g, "icmp slt i64 " + index + ", " + count.code)
+        line(g, "  br i1 " + more + ", label %" + body + ", label %" + done)
+        mark(g, body)
+        if ty == "str":
+            character = call(g, "rt_string_get", [original.code, index, "0"], "str")
+            output = slot(g, "str")
+            store(g, output, character.code)
+            specials = ["\"", "\\", "\n", "\r", "\t"]
+            escaped = ["\\\"", "\\\\", "\\n", "\\r", "\\t"]
+            for i in range(len(specials)):
+                equal = equal_value(g, character, Value(literal(m, specials[i]), "str"))
+                condition = instruction(g, "icmp ne i64 " + equal.code + ", 0")
+                replacement = instruction(g, "select i1 " + condition + ", i64 " + literal(m, escaped[i]) + ", i64 " + load(g, output))
+                store(g, output, replacement)
+            print_value(g, Value(load(g, output), "str"), False)
+        else:
+            separator = label(g)
+            element = label(g)
+            first = instruction(g, "icmp eq i64 " + index + ", 0")
+            line(g, "  br i1 " + first + ", label %" + element + ", label %" + separator)
+            mark(g, separator)
+            print_text(g, ", ")
+            jump(g, element)
+            mark(g, element)
+            item = call(g, "rt_list_get", [original.code, index, "0"], semantic.element(ty))
+            print_value(g, item, True)
+        store(g, cursor, instruction(g, "add i64 " + index + ", 1"))
+        jump(g, test)
+        mark(g, done)
+        if ty == "str":
+            print_text(g, "\"")
+        else:
+            print_text(g, "]")
+    else:
+        declaration = m.program.declarations[semantic.declaration(m.program, ty)]
+        variants = [declaration]
+        if declaration.kind == "enum":
+            variants = declaration.children
+        tag = call(g, "rt_object_tag", [original.code], "int")
+        for vi in range(len(variants)):
+            variant = variants[vi]
+            next_variant = label(g)
+            if declaration.kind == "enum":
+                body = label(g)
+                matches = instruction(g, "icmp eq i64 " + tag.code + ", " + str(vi))
+                line(g, "  br i1 " + matches + ", label %" + body + ", label %" + next_variant)
+                mark(g, body)
+                print_text(g, ty + "." + variant.text + "(")
+            else:
+                print_text(g, ty + "(")
+            for i in range(len(variant.types)):
+                if i > 0:
+                    print_text(g, ", ")
+                print_text(g, variant.names[i] + "=")
+                item = call(g, "rt_object_get", [original.code, str(i)], variant.types[i])
+                print_value(g, item, True)
+            print_text(g, ")")
+            jump(g, done)
+            if declaration.kind == "enum":
+                mark(g, next_variant)
+        if declaration.kind == "enum":
+            unused = call(g, "rt_panic", ["0", literal(m, "invalid enum tag")], "None")
+            line(g, "  unreachable")
+        mark(g, done)
+    unused = call(g, "rt_roots_leave", ["%frame"], "None")
+    line(g, "  ret i64 0")
+    m.helpers.append(render_function(g, name, ["i64 %arg0"]))
+    return name
+
 fn builtin(g: Generator, n: syntax.Node) -> Value:
     name = n.text
     loc = str(n.line)
@@ -322,6 +630,8 @@ fn builtin(g: Generator, n: syntax.Node) -> Value:
         return method(g, named(g, n, name[:len(name) - 7]), "append", n.children, loc)
     if semantic.suffix(name, ".pop"):
         return method(g, named(g, n, name[:len(name) - 4]), "pop", n.children, loc)
+    if name == "copy":
+        return copy_value(g, expression(g, n.children[0], ""))
     if name == "sys.platform":
         return call(g, "rt_platform", [], "str")
     if name == "len" or name == "str":
@@ -343,12 +653,7 @@ fn builtin(g: Generator, n: syntax.Node) -> Value:
         for i in range(len(values)):
             if i > 0:
                 unused = call(g, "rt_print_space", [], "None")
-            kind = "0"
-            if values[i].ty == "bool":
-                kind = "1"
-            elif values[i].ty == "str":
-                kind = "2"
-            unused = call(g, "rt_print", [values[i].code, kind], "None")
+            print_value(g, values[i], False)
         return call(g, "rt_print_newline", [], "None")
     if name == "http.serve":
         host = expression(g, n.children[0], "str")
@@ -453,8 +758,7 @@ fn expression(g: Generator, n: syntax.Node, hint: str) -> Value:
         if fi < 0:
             return builtin(g, n)
         target = g.module.program.declarations[fi]
-        args = evaluated(g, n.children, target.types)
-        return value(g, instruction(g, "call i64 @" + symbol(g.module, n.text) + "(" + arguments(args) + ")"), target.type_name)
+        return invoke(g, n, target)
     if kind == "unary":
         v = expression(g, n.children[0], "")
         if n.text == "not":
@@ -485,6 +789,11 @@ fn expression(g: Generator, n: syntax.Node, hint: str) -> Value:
             return call(g, "rt_string_concat", [left.code, right.code, loc], "str")
         if semantic.has(["+", "-", "*", "//", "%"], op):
             return arithmetic(g, op, left.code, right.code, loc)
+        if op == "==" or op == "!=":
+            result = equal_value(g, left, right)
+            if op == "!=":
+                return Value(instruction(g, "xor i64 " + result.code + ", 1"), "bool")
+            return result
         if left.ty == "str":
             left = call(g, "rt_string_compare", [left.code, right.code], "int")
             right = Value("0", "int")
@@ -547,7 +856,8 @@ fn for_loop(g: Generator, n: syntax.Node):
         source = expression(g, iterable, "")
         ty = "str"
         if semantic.list_type(source.ty):
-            source = call(g, "rt_list_snapshot", [source.code, loc], source.ty)
+            if not g.module.program.core:
+                source = call(g, "rt_list_snapshot", [source.code, loc], source.ty)
             limit = call(g, "rt_list_len", [source.code], "int").code
             ty = semantic.element(source.ty)
         else:
@@ -640,6 +950,17 @@ fn statement(g: Generator, n: syntax.Node) -> bool:
         v = expression(g, n.children[0], hint)
         address = bind(g, n.text, v.ty)
         store(g, address, v.code)
+    elif kind == "augment":
+        target = place(g, n.children[0])
+        before = load(g, target.address)
+        right = expression(g, n.children[1], target.ty)
+        result = Value("0", target.ty)
+        if target.ty == "str" and n.text == "+":
+            result = call(g, "rt_string_concat", [before, right.code, loc], "str")
+        else:
+            result = arithmetic(g, n.text, before, right.code, loc)
+        store(g, target.address, result.code)
+        finish_place(g, target)
     elif kind == "set_field":
         base = expression(g, n.children[0], "")
         i = field_index(g, base.ty, n.text)
@@ -737,18 +1058,26 @@ fn function(m: Module, n: syntax.Node) -> str:
     params: list[str] = []
     for i in range(len(n.names)):
         params.append("i64 %arg" + str(i))
-        address = bind(g, n.names[i], n.types[i])
-        store(g, address, "%arg" + str(i))
+        if semantic.has(n.mutable_names, n.names[i]):
+            address = instruction(g, "inttoptr i64 %arg" + str(i) + " to ptr")
+            g.locals.append(Binding(n.names[i], address, n.types[i]))
+        else:
+            address = bind(g, n.names[i], n.types[i])
+            store(g, address, "%arg" + str(i))
     falls = block(g, n.children)
     if falls:
         if not g.runtime:
             unused = call(g, "rt_roots_leave", ["%frame"], "None")
         line(g, "  ret i64 0")
+    return render_function(g, symbol(m, n.text), params)
+
+fn render_function(g: Generator, name: str, params: list[str]) -> str:
+    m = g.module
     if m.library and len(g.roots) > 0:
-        semantic.fail(n, "runtime functions must use raw integer handles instead of managed values")
+        panic("runtime functions must use raw integer handles instead of managed values")
     declare(m, "rt_roots_enter", 2)
     declare(m, "rt_roots_leave", 1)
-    parts: list[str] = ["define i64 @" + symbol(m, n.text) + "(" + str.join(params, ", ") + ") {\nentry:\n"]
+    parts: list[str] = ["define i64 @" + name + "(" + str.join(params, ", ") + ") {\nentry:\n"]
     # All managed locals and temporaries live in one contiguous shadow frame.
     count = len(g.roots)
     parts.append("  %roots = alloca [" + str(count + 1) + " x i64], align 8\n")
@@ -785,7 +1114,7 @@ fn emit_module(program: syntax.Program, library: bool, bundled: bool) -> str:
     digits = "0123456789ABCDEF"
     for i in range(256):
         hexbytes.append("\\" + digits[i // 16] + digits[i % 16])
-    m = Module(program, [], [], [], 0, library, bundled, hexbytes, [], [])
+    m = Module(program, [], [], [], [], 0, library, bundled, hexbytes, [], [])
     bodies: list[str] = []
     for n in program.declarations:
         if n.kind == "fn":
@@ -816,6 +1145,8 @@ fn emit_module(program: syntax.Program, library: bool, bundled: bool) -> str:
                 defined = True
         if not defined:
             parts.append(declaration)
+    for helper in m.helpers:
+        parts.append(helper)
     for body in bodies:
         parts.append(body)
     if not library:

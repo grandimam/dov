@@ -31,6 +31,8 @@
 
 Faz is a small, statically typed language with Python-inspired syntax, automatic garbage collection, and native executables. **Its compiler is written in Faz.** Bring an idea, a text editor, and a perfectly unreasonable amount of enthusiasm.
 
+The [core-language v0.1 transition](docs/core-language.md) introduces immutable-by-default bindings, explicit mutation, and checked exclusive access. The compiler and historical examples still use the earlier dialect via an explicit `--legacy-language` bootstrap option; see the transition notes before running older examples.
+
 ```python
 fn main():
     plans = [
@@ -116,7 +118,7 @@ Try it: `faz run examples/functions.fz` → `A big square: 25`.
 
 ```python
 fn main():
-    plans = ["learn Faz", "make something silly"]
+    mut plans = ["learn Faz", "make something silly"]
     plans.append("take a break")
 
     for plan in plans:
@@ -150,7 +152,7 @@ fn main():
     show(Reply.Missing())
 ```
 
-Try it: `faz run examples/matching.fz`.
+Try it: `faz run examples/matching.fz --legacy-language`. Pattern matching remains in the earlier dialect while its ownership rules are deferred.
 
 </details>
 
@@ -188,7 +190,7 @@ fn main():
     print("All tasks finished")
 ```
 
-Try it: `faz run examples/tasks.fz`. The group waits for its workers before leaving the block. `task.sleep` takes milliseconds. Tasks cooperate on one OS thread; they do not provide CPU parallelism.
+Try it: `faz run examples/tasks.fz --legacy-language`. The group waits for its workers before leaving the block. `task.sleep` takes milliseconds. Tasks cooperate on one OS thread; they do not provide CPU parallelism.
 
 </details>
 
@@ -216,7 +218,7 @@ faz build plans.fz -o build/plans   # Keep a native executable
 faz emit-llvm plans.fz -o plans.ll  # Peek at the LLVM IR
 ```
 
-Without `-o`, `faz build plans.fz` writes `build/plans`. Pass program arguments after `--`, as in `faz run examples/arguments.fz -- "tiny internet"`. Use `faz --help` for the command list.
+Without `-o`, `faz build plans.fz` writes `build/plans`. Pass program arguments after `--`, as in `faz run examples/arguments.fz --legacy-language -- "tiny internet"`. Use `faz --help` for the command list.
 
 ### Dress up your editor
 
@@ -260,7 +262,7 @@ The repository ships generated LLVM IR snapshots in `bootstrap/`. Clang turns th
 To try compiling the compiler directly:
 
 ```sh
-./build/faz build src/compiler/main.fz -o build/faz-next
+./build/faz build src/compiler/main.fz --legacy-language -o build/faz-next
 ./build/faz-next run examples/hello.fz
 ```
 

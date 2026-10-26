@@ -1,0 +1,145 @@
+# Core language v0.1 regressions. This harness itself is transitional Faz,
+# but every checked program uses DEFAULT semantics, never --legacy-language.
+import support
+
+fn run_source(s: support.Suite, name: str, code: str, expected: str):
+    directory = support.fresh()
+    path = directory + "/main.fz"
+    binary = directory + "/program"
+    fs.write_text(path, code)
+    result = support.capture(s.compiler, ["build", path, "-o", binary])
+    support.check(s, result.status == 0, "core build: " + name, result.out + result.err)
+    if result.status == 0:
+        support.success(s, support.capture(binary, []), expected, "core output: " + name)
+    fs.remove_temp(directory)
+
+fn reject(s: support.Suite, name: str, code: str):
+    directory = support.fresh()
+    path = directory + "/main.fz"
+    fs.write_text(path, code)
+    result = support.capture(s.compiler, ["check", path])
+    support.check(s, result.status != 0 and support.contains(result.err, "main.fz:"), "core rejection: " + name, result.out + result.err)
+    fs.remove_temp(directory)
+
+fn bindings(s: support.Suite):
+    run_source(s, "immutable values", "fn main():\n    name = \"Faz\"\n    age = 32\n    print(name, age)\n", "Faz 32\n")
+    run_source(s, "mutable scalar arithmetic", "fn main():\n    mut count = 10\n    count += 4\n    count -= 2\n    count *= 3\n    count //= 4\n    count %= 5\n    print(count)\n", "4\n")
+    run_source(s, "mutable collections", "fn main():\n    mut numbers = [1, 2, 3]\n    numbers.append(4)\n    numbers[0] = 10\n    numbers[1] *= 2\n    print(numbers)\n", "[10, 4, 3, 4]\n")
+    reject(s, "immutable reassignment", "fn main():\n    age = 32\n    age = 33\n")
+    reject(s, "immutable augmented reassignment", "fn main():\n    count = 1\n    count += 1\n")
+    reject(s, "fixed mutable type", "fn main():\n    mut count = 1\n    count = \"hello\"\n")
+    reject(s, "immutable append", "fn main():\n    numbers = [1, 2]\n    numbers.append(3)\n")
+    reject(s, "immutable index write", "fn main():\n    numbers = [1, 2]\n    numbers[0] = 3\n")
+    reject(s, "immutable nested field", "struct Person:\n    scores: list[int]\nfn main():\n    person = Person([80])\n    person.scores.append(100)\n")
+    reject(s, "immutable nested index", "fn main():\n    values = [[1], [2]]\n    values[0].append(3)\n")
+    reject(s, "immutable to mutable alias", "fn main():\n    a = [1]\n    mut b = a\n    b.append(2)\n")
+
+fn calls(s: support.Suite):
+    run_source(s, "mutable scalar parameter", "fn increment(mut count: int):\n    count += 1\nfn main():\n    mut count = 0\n    increment(count)\n    increment(count)\n    print(count)\n", "2\n")
+    run_source(s, "mutable record parameter", "struct Counter:\n    value: int\nfn increment(mut counter: Counter):\n    counter.value += 1\nfn main():\n    mut counter = Counter(0)\n    increment(counter)\n    increment(counter)\n    print(counter.value)\n", "2\n")
+    run_source(s, "independent mutable fields", "struct Pair:\n    left: list[int]\n    right: list[int]\nfn combine(mut left: list[int], mut right: list[int]):\n    left.append(1)\n    right.append(2)\nfn main():\n    mut pair = Pair([10], [20])\n    combine(pair.left, pair.right)\n    print(pair.left, pair.right)\n", "[10, 1] [20, 2]\n")
+    run_source(s, "temporary read access", "fn display(values: list[int]):\n    print(values)\nfn main():\n    mut numbers = [1]\n    display(numbers)\n    numbers.append(2)\n    display(numbers)\n", "[1]\n[1, 2]\n")
+    reject(s, "ordinary parameter reassignment", "fn update(x: int):\n    x = 20\nfn main():\n    update(1)\n")
+    reject(s, "ordinary parameter mutation", "fn update(values: list[int]):\n    values.append(20)\nfn main():\n    values = [1]\n    update(values)\n")
+    reject(s, "immutable argument for mutable parameter", "struct Counter:\n    value: int\nfn increment(mut counter: Counter):\n    counter.value += 1\nfn main():\n    counter = Counter(0)\n    increment(counter)\n")
+    reject(s, "duplicate exclusive argument", "struct Account:\n    balance: int\nfn transfer(mut source: Account, mut target: Account):\n    source.balance -= 10\n    target.balance += 10\nfn main():\n    mut account = Account(100)\n    transfer(account, account)\n")
+    reject(s, "read-write overlap", "struct Account:\n    balance: int\nfn compare(current: Account, mut target: Account):\n    target.balance = current.balance\nfn main():\n    mut account = Account(100)\n    compare(account, account)\n")
+    reject(s, "whole owner and nested field overlap", "struct Account:\n    balance: int\nfn update(mut account: Account, mut balance: int):\n    balance += 1\nfn main():\n    mut account = Account(100)\n    update(account, account.balance)\n")
+    reject(s, "call-site mut unsupported", "fn update(mut count: int):\n    count += 1\nfn main():\n    mut count = 0\n    update(mut count)\n")
+
+fn ownership(s: support.Suite):
+    run_source(s, "immutable sharing", "fn main():\n    a = [1, 2]\n    b = a\n    print(a, b)\n", "[1, 2] [1, 2]\n")
+    run_source(s, "ownership transfer", "fn main():\n    mut a = [1]\n    mut b = a\n    b.append(2)\n    print(b)\n", "[1, 2]\n")
+    run_source(s, "freeze transfer", "fn main():\n    mut a = [1]\n    b = a\n    print(b)\n", "[1]\n")
+    run_source(s, "explicit independent nested copy", "struct Person:\n    scores: list[int]\nfn main():\n    mut a = Person([1, 2])\n    mut b = copy(a)\n    b.scores.append(3)\n    print(a.scores, b.scores)\n", "[1, 2] [1, 2, 3]\n")
+    run_source(s, "return owned local", "fn make_numbers() -> list[int]:\n    mut values = [1, 2]\n    values.append(3)\n    return values\nfn main():\n    mut values = make_numbers()\n    values.append(4)\n    print(values)\n", "[1, 2, 3, 4]\n")
+    run_source(s, "explicit nested copy before mutation", "struct Address:\n    city: str\nstruct Person:\n    address: Address\nfn main():\n    mut person = Person(Address(\"Dubai\"))\n    address = copy(person.address)\n    person.address.city = \"Chennai\"\n    print(address.city, person.address.city)\n", "Dubai Chennai\n")
+    reject(s, "use after move", "fn main():\n    mut a = [1]\n    mut b = a\n    print(a)\n")
+    reject(s, "use after freeze", "fn main():\n    mut a = [1]\n    b = a\n    print(a)\n")
+    reject(s, "borrowed aggregate return", "fn first(values: list[list[int]]) -> list[int]:\n    return values[0]\nfn main():\n    mut values = [[1]]\n    print(first(values))\n")
+    reject(s, "nested borrowed alias extraction", "struct Person:\n    scores: list[int]\nfn main():\n    mut person = Person([1])\n    scores = person.scores\n    person.scores.append(2)\n    print(scores)\n")
+    reject(s, "moved on one branch", "fn main():\n    mut values = [1]\n    if True:\n        moved = values\n        print(moved)\n    print(values)\n")
+
+fn scopes(s: support.Suite):
+    run_source(s, "mutable outer scope", "fn main():\n    mut count = 10\n    if count > 5:\n        count = 20\n    print(count)\n", "20\n")
+    run_source(s, "mutable accumulator", "fn total(numbers: list[int]) -> int:\n    mut result = 0\n    for number in numbers:\n        result += number\n    return result\nfn main():\n    print(total([1, 2, 3]))\n", "6\n")
+    run_source(s, "index iteration updates", "fn main():\n    mut values = [1, 2, 3]\n    for index in range(len(values)):\n        values[index] *= 2\n    print(values)\n", "[2, 4, 6]\n")
+    run_source(s, "different-type sibling lexical bindings", "fn main():\n    if True:\n        item = 1\n        print(item)\n    if True:\n        item = \"two\"\n        print(item)\n", "1\ntwo\n")
+    run_source(s, "conditional outer assignment", "fn main():\n    mut result = 0\n    if True:\n        result = 10\n    else:\n        result = 20\n    print(result)\n", "10\n")
+    reject(s, "block scope", "fn main():\n    if True:\n        value = 20\n    print(value)\n")
+    reject(s, "no implicit shadowing", "fn main():\n    x = 10\n    if True:\n        x = 20\n")
+    reject(s, "no explicit same-name redeclaration", "fn main():\n    x = 10\n    if True:\n        mut x = 20\n")
+    reject(s, "branch-local declarations", "fn main():\n    if True:\n        result = 10\n    else:\n        result = 20\n    print(result)\n")
+    reject(s, "read-only loop binding", "fn main():\n    for number in [1, 2]:\n        number = 3\n")
+    reject(s, "active iteration mutation", "fn main():\n    mut numbers = [1, 2]\n    for number in numbers:\n        numbers.append(number)\n")
+
+fn equality(s: support.Suite):
+    run_source(s, "scalar and string equality", "fn main():\n    print(10 == 10, 10 != 10, \"hello\" == \"hello\")\n", "True False True\n")
+    run_source(s, "list value equality", "fn main():\n    a = [1, 2, 3]\n    b = [1, 2, 3]\n    c = [1, 2, 4]\n    print(a == b, a == c, a != c)\n", "True False True\n")
+    run_source(s, "nested struct equality", "struct Person:\n    name: str\n    scores: list[int]\nfn main():\n    a = Person(\"Ali\", [80, 90])\n    b = Person(\"Ali\", [80, 90])\n    print(a == b)\n", "True\n")
+    run_source(s, "equality reflects mutation", "fn main():\n    mut a = [1, 2]\n    b = [1, 2]\n    print(a == b)\n    a.append(3)\n    print(a == b)\n", "True\nFalse\n")
+
+fn adversarial(s: support.Suite):
+    reject(s, "projected call checks mutable argument", "struct Counter:\n    value: int\nfn make(mut counter: Counter) -> Counter:\n    counter.value += 1\n    return Counter(counter.value)\nfn main():\n    counter = Counter(0)\n    print(make(counter).value)\n")
+    reject(s, "index expression checks mutable argument", "struct Counter:\n    value: int\nfn index(mut counter: Counter) -> int:\n    counter.value += 1\n    return 0\nfn main():\n    counter = Counter(0)\n    values = [1]\n    print(values[index(counter)])\n")
+    reject(s, "local function-name collision does not bypass move", "struct Box:\n    values: list[int]\nfn values() -> int:\n    return 1\nfn main():\n    mut values = [1]\n    frozen = Box(values)\n    values.append(2)\n    print(frozen.values)\n")
+    reject(s, "enum construction moves mutable payload", "enum Box:\n    Items(values: list[int])\nfn main():\n    mut values = [1]\n    box = Box.Items(values)\n    values.append(2)\n    print(values)\n")
+    reject(s, "returned shared aggregate cannot become mutable", "fn make() -> list[int]:\n    values = [1]\n    return values\nfn main():\n    mut values = make()\n    values.append(2)\n")
+    reject(s, "zero-trip for cannot restore moved owner", "fn main():\n    mut values = [1]\n    frozen = values\n    for index in range(0):\n        values = [2]\n    values.append(3)\n    print(frozen)\n")
+    reject(s, "zero-trip while cannot restore moved owner", "fn main():\n    mut values = [1]\n    frozen = values\n    while False:\n        values = [2]\n    values.append(3)\n    print(frozen)\n")
+    reject(s, "equality retains aggregate read loan", "fn mutate(mut values: list[int]) -> list[int]:\n    values.append(2)\n    return copy(values)\nfn main():\n    mut values = [1]\n    print(values == mutate(values))\n")
+    reject(s, "print retains aggregate read loan", "fn mutate(mut values: list[int]) -> int:\n    values.append(2)\n    return 1\nfn main():\n    mut values = [1]\n    print(values, mutate(values))\n")
+    run_source(s, "scalar observation ends read loan", "fn mutate(mut values: list[int]) -> int:\n    values.append(2)\n    return 1\nfn main():\n    mut values = [1]\n    print(len(values), mutate(values))\n    print(values)\n", "1 1\n[1, 2]\n")
+    reject(s, "shared return fixed point through forward calls", "fn outer() -> list[int]:\n    return middle()\nfn middle() -> list[int]:\n    return inner()\nfn inner() -> list[int]:\n    immutable = [1]\n    return immutable\nfn main():\n    mut values = outer()\n    values.append(2)\n")
+    reject(s, "borrowed enum payload cannot escape", "enum E:\n    Box(values: list[int])\nfn wrap(values: list[int]) -> E:\n    return E.Box(values)\nfn main():\n    mut values = [1]\n    mut box = wrap(values)\n    values.append(2)\n")
+    run_source(s, "pop transfers removed aggregate ownership", "fn take(mut values: list[list[int]]) -> list[int]:\n    return values.pop()\nfn main():\n    mut values = [[1]]\n    mut item = take(values)\n    item.append(2)\n    print(item, len(values))\n", "[1, 2] 0\n")
+    run_source(s, "reinitialize moved owner", "fn main():\n    mut values = [1]\n    moved = values\n    values = [2]\n    print(moved, values)\n", "[1] [2]\n")
+    run_source(s, "branch reinitialization restores owner", "fn main():\n    mut values = [1]\n    if True:\n        moved = values\n        print(moved)\n        values = [2]\n    print(values)\n", "[1]\n[2]\n")
+    run_source(s, "mutable aggregate parameter rebinding", "fn replace(mut values: list[int]):\n    mut fresh = [7, 8]\n    values = fresh\nfn main():\n    mut values = [1]\n    replace(values)\n    print(values)\n", "[7, 8]\n")
+
+fn lexical_modules(s: support.Suite):
+    directory = support.fresh()
+    path = directory + "/main.fz"
+    fs.write_text(path, "import helper\nfn main():\n    helper.work()\n    print(helper.append(1), helper.pop())\n    values = helper.values()\n    print(values)\n")
+    fs.write_text(directory + "/helper.fz", "fn value() -> int:\n    return 42\nfn work():\n    print(value())\n    if True:\n        value = 2\n        print(value)\n    print(value())\nfn append(number: int) -> int:\n    return number + 1\nfn pop() -> int:\n    return 3\nfn values() -> list[int]:\n    result = [4]\n    return result\n")
+    result = support.capture(s.compiler, ["run", path])
+    support.success(s, result, "42\n2\n42\n2 3\n[4]\n", "module globals, method-like functions, and immutable returns")
+    fs.write_text(path, "import helper\nfn main():\n    mut values = helper.values()\n    values.append(5)\n")
+    rejected = support.capture(s.compiler, ["check", path])
+    support.check(s, rejected.status != 0 and support.contains(rejected.err, "main.fz:"), "qualified shared return cannot become mutable", rejected.out + rejected.err)
+    fs.remove_temp(directory)
+
+fn task_groups(s: support.Suite):
+    run_source(s, "task groups preserve safe read-only callbacks", "fn worker(value: int):\n    print(value)\nfn main():\n    with task.group() as group:\n        group.spawn(worker, 7)\n    print(\"joined\")\n", "7\njoined\n")
+    reject(s, "task callback cannot borrow mutable caller state", "fn worker(mut value: int):\n    value += 1\nfn main():\n    mut value = 0\n    with task.group() as group:\n        group.spawn(worker, value)\n")
+
+fn modes(s: support.Suite):
+    directory = support.fresh()
+    path = directory + "/main.fz"
+    output = directory + "/output"
+    fs.write_text(path, "fn main():\n    count = 0\n    count = 1\n    print(count)\n")
+    for command in ["check", "build", "run", "emit-llvm", "emit-llvm-library"]:
+        arguments = [command, path]
+        if command == "build" or command == "emit-llvm" or command == "emit-llvm-library":
+            arguments.append("-o")
+            arguments.append(output)
+        rejected = support.capture(s.compiler, arguments)
+        support.check(s, rejected.status != 0 and support.contains(rejected.err, "main.fz:"), "default mode enforced by " + command, rejected.out + rejected.err)
+        arguments.append("--legacy-language")
+        accepted = support.capture(s.compiler, arguments)
+        support.check(s, accepted.status == 0, "explicit compatibility for " + command, accepted.out + accepted.err)
+    # Positional emission is not an implicit language-mode bypass either.
+    rejected = support.capture(s.compiler, [path, output])
+    support.check(s, rejected.status != 0 and support.contains(rejected.err, "main.fz:"), "positional emission enforces core", rejected.out + rejected.err)
+    fs.remove_temp(directory)
+
+fn run(s: support.Suite):
+    bindings(s)
+    calls(s)
+    ownership(s)
+    scopes(s)
+    equality(s)
+    modes(s)
+    adversarial(s)
+    lexical_modules(s)
+    task_groups(s)

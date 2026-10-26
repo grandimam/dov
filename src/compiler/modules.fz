@@ -205,4 +205,4 @@ fn load(filename: str) -> syntax.Program:
     sources: list[syntax.Node] = []
     for path in loader.paths:
         sources.append(syntax.node("source", "", 1, 1, path))
-    return syntax.Program(loader.declarations, sources, fs.canonical(filename))
+    return syntax.Program(loader.declarations, sources, fs.canonical(filename), False)

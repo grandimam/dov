@@ -141,5 +141,12 @@
       "]"
     ],
     "description": "Declare a typed list with multiline contents"
+  },
+  "Mutable binding": {
+    "prefix": "mut",
+    "body": [
+      "mut ${1:name} = ${0:value}"
+    ],
+    "description": "An explicitly mutable binding"
   }
 }

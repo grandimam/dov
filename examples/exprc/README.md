@@ -4,10 +4,13 @@ A small end-to-end compiler example: the scanner, AST, parser, and LLVM emitter 
 
 Supported input: decimal integers, `+`, `-`, `*`, unary `-`, parentheses, whitespace, and `#` comments. Arithmetic is signed 64-bit. Literal magnitudes stop at `9223372036854775807`; overflow while scanning fails with a Faz diagnostic, and generated-program arithmetic overflow exits with code 2.
 
+This educational compiler still uses the earlier Faz dialect. Its build command
+opts into `--legacy-language`; its generated executables are unchanged.
+
 From the repository root:
 
 ```sh
-faz build examples/exprc/main.fz -o build/exprc
+faz build examples/exprc/main.fz --legacy-language -o build/exprc
 ./build/exprc examples/exprc/example.expr build/expression.ll
 clang -x ir -O2 build/expression.ll -o build/expression
 ./build/expression

@@ -36,7 +36,7 @@ fn make(cursor: Cursor, kind: str, text: str, token: syntax.Token) -> syntax.Nod
     return syntax.node(kind, text, token.line, token.column, cursor.source)
 
 fn reserved(name: str) -> bool:
-    for keyword in ["fn", "def", "return", "if", "elif", "else", "while", "for", "in", "break", "continue", "pass", "True", "False", "None", "and", "or", "not", "with", "as", "struct", "enum", "match", "case", "import", "assert"]:
+    for keyword in ["fn", "def", "return", "if", "elif", "else", "while", "for", "in", "break", "continue", "pass", "True", "False", "None", "and", "or", "not", "with", "as", "struct", "enum", "match", "case", "import", "assert", "mut"]:
         if name == keyword:
             return True
     return False
@@ -75,6 +75,9 @@ fn type_name(cursor: Cursor) -> str:
 fn typed_fields(cursor: Cursor, target: syntax.Node):
     expect(cursor, "(")
     while not is_text(cursor, ")"):
+        mutable = eat(cursor, "mut")
+        if mutable and target.kind != "fn":
+            fail(cursor, "mut is only valid on function parameters")
         name = identifier(cursor)
         expect(cursor, ":")
         field_type = type_name(cursor)
@@ -82,6 +85,8 @@ fn typed_fields(cursor: Cursor, target: syntax.Node):
             fail(cursor, "parameters cannot have type None")
         target.names.append(name)
         target.types.append(field_type)
+        if mutable:
+            target.mutable_names.append(name)
         if not eat(cursor, ","):
             break
     expect(cursor, ")")
@@ -177,12 +182,16 @@ fn statement(cursor: Cursor) -> syntax.Node:
     elif eat(cursor, "pass"):
         result.kind = "pass"
     else:
-        assignment = False
+        mutable = eat(cursor, "mut")
+        if mutable:
+            token = peek(cursor)
+        assignment = mutable
         if token.kind == "name" and cursor.position + 1 < len(cursor.tokens):
             next_token = cursor.tokens[cursor.position + 1]
-            assignment = next_token.kind == "symbol" and (next_token.text == "=" or next_token.text == ":")
+            assignment = assignment or (next_token.kind == "symbol" and (next_token.text == "=" or next_token.text == ":"))
         if assignment:
             result.kind = "assign"
+            result.mutable = mutable
             result.text = identifier(cursor)
             if eat(cursor, ":"):
                 result.type_name = type_name(cursor)
@@ -204,6 +213,15 @@ fn statement(cursor: Cursor) -> syntax.Node:
                     result.children.append(value)
                 else:
                     fail(cursor, "assignment target must be a variable, field, or list index")
+            elif is_text(cursor, "+=") or is_text(cursor, "-=") or is_text(cursor, "*=") or is_text(cursor, "//=") or is_text(cursor, "%="):
+                operator = peek(cursor).text
+                cursor.position = cursor.position + 1
+                if target.kind != "name" and target.kind != "field" and target.kind != "index":
+                    fail(cursor, "augmented assignment target must be a variable, field, or list index")
+                result.kind = "augment"
+                result.text = operator[:len(operator) - 1]
+                result.children.append(target)
+                result.children.append(expression(cursor, 0))
             else:
                 result.kind = "expr"
                 result.children.append(target)
@@ -356,7 +374,7 @@ fn parse(source: str, path: str) -> syntax.Program:
     cursor = Cursor(lexer.lex(source, path), 0, path)
     declarations: list[syntax.Node] = []
     imports: list[syntax.Node] = []
-    result = syntax.Program(declarations, imports, path)
+    result = syntax.Program(declarations, imports, path, False)
     while peek(cursor).kind != "eof":
         token = peek(cursor)
         if eat(cursor, "import"):

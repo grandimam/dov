@@ -5,7 +5,7 @@ fn fib(n: int) -> int:
     return fib(n - 1) + fib(n - 2)
 
 fn main():
-    i = 0
+    mut i = 0
     while i < 12:
         print(i, fib(i))
         i = i + 1

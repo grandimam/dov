@@ -99,7 +99,10 @@ fn line_tokens(state: State, chars: list[str], line: int):
             pair = ""
             if pos + 1 < n:
                 pair = c + chars[pos + 1]
-            if pair == "->" or pair == "==" or pair == "!=" or pair == "<=" or pair == ">=" or pair == "//":
+            if pair == "//" and pos + 2 < n and chars[pos + 2] == "=":
+                value = "//="
+                pos = pos + 3
+            elif pair == "->" or pair == "==" or pair == "!=" or pair == "<=" or pair == ">=" or pair == "//" or pair == "+=" or pair == "-=" or pair == "*=" or pair == "%=":
                 value = pair
                 pos = pos + 2
             elif symbol(c):

@@ -15,14 +15,18 @@ struct Node:
     children: list[Node]
     names: list[str]
     types: list[str]
+    mutable: bool
+    mutable_names: list[str]
 
 struct Program:
     declarations: list[Node]
     imports: list[Node]
     source: str
+    core: bool
 
 fn node(kind: str, text: str, line: int, column: int, source: str) -> Node:
     children: list[Node] = []
     names: list[str] = []
     types: list[str] = []
-    return Node(kind, text, "", line, column, source, children, names, types)
+    mutable_names: list[str] = []
+    return Node(kind, text, "", line, column, source, children, names, types, False, mutable_names)

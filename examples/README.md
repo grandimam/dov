@@ -1,5 +1,8 @@
 # Learn Faz by running it
 
+> Core-language transition: `hello.fz`, `fibonacci.fz`, `functions.fz`, `lists.fz`, and `structs.fz` use the new default rules. The commands below mark older examples that require `--legacy-language` after the source path. In particular, pattern matching and the educational compiler have not been migrated. See [the transition notes](../docs/core-language.md).
+
+
 Start with the [installation instructions](../README.md#try-it). Run the commands below from the repository root. If you haven't installed the CLI on your `PATH`, replace `faz` with `./build/faz`.
 
 ## Your first program
@@ -67,7 +70,7 @@ faz run examples/structs.fz
 [`matching.fz`](matching.fz) defines a reply that can be `Reply.Found(message)` or `Reply.Missing()`. `match` handles each variant and extracts its data. Faz checks that every variant is covered.
 
 ```sh
-faz run examples/matching.fz
+faz run examples/matching.fz --legacy-language
 # Found a tiny treasure
 # Nothing here yet
 ```
@@ -75,7 +78,7 @@ faz run examples/matching.fz
 For a recursive enum, try [`ast.fz`](ast.fz):
 
 ```sh
-faz run examples/ast.fz
+faz run examples/ast.fz --legacy-language
 # answer: 42 column: 3
 # 0
 # 1
@@ -96,16 +99,16 @@ fn main():
 ```
 
 ```sh
-faz run examples/arguments.fz
+faz run examples/arguments.fz --legacy-language
 # Hello, world!
-faz run examples/arguments.fz -- "tiny internet"
+faz run examples/arguments.fz --legacy-language -- "tiny internet"
 # Hello, tiny internet!
 ```
 
 The `--` separates Faz's options from your program's arguments. `sys.args()` excludes the executable name. After building an executable, pass arguments directly:
 
 ```sh
-faz build examples/arguments.fz -o build/greet
+faz build examples/arguments.fz --legacy-language -o build/greet
 ./build/greet "tiny internet"
 # Hello, tiny internet!
 ```

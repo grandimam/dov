@@ -1,0 +1,119 @@
+# Resolve lexical bindings to distinct compiler-local names before type checking.
+# Source coordinates are retained. Parameters keep their ABI-independent names.
+# '#' cannot occur in a source identifier, so generated names cannot collide.
+import syntax
+
+struct Name:
+    source: str
+    resolved: str
+
+struct Scope:
+    names: list[Name]
+    next: int
+    namespace: str
+    globals: list[str]
+
+fn position(scope: Scope, name: str) -> int:
+    index = len(scope.names) - 1
+    while index >= 0:
+        if scope.names[index].source == name:
+            return index
+        index = index - 1
+    return -1
+
+fn resolve(scope: Scope, name: str) -> str:
+    end = len(name)
+    for index in range(len(name)):
+        if name[index] == ".":
+            end = index
+            break
+    found = position(scope, name[:end])
+    if found >= 0:
+        return scope.names[found].resolved + name[end:]
+    candidate = scope.namespace + name[:end]
+    for global_name in scope.globals:
+        if candidate == global_name:
+            return candidate + name[end:]
+    return name
+
+fn declare(scope: Scope, node: syntax.Node, name: str) -> str:
+    found = position(scope, name)
+    if found >= 0:
+        return scope.names[found].resolved
+    for reserved in ["task", "http", "fs", "sys", "raw", "net"]:
+        if name == reserved:
+            panic(node.source + ":" + str(node.line) + ":" + str(node.column) + ": cannot bind reserved name '" + name + "'")
+    scope.next = scope.next + 1
+    renamed = name + "#" + str(scope.next)
+    scope.names.append(Name(name, renamed))
+    return renamed
+
+fn expression(scope: Scope, node: syntax.Node):
+    if node.kind == "name" or node.kind == "call":
+        node.text = resolve(scope, node.text)
+    for child in node.children:
+        expression(scope, child)
+
+fn restore(scope: Scope, count: int):
+    while len(scope.names) > count:
+        scope.names.pop()
+
+fn block(scope: Scope, nodes: list[syntax.Node]):
+    count = len(scope.names)
+    for node in nodes:
+        statement(scope, node)
+    restore(scope, count)
+
+fn statement(scope: Scope, node: syntax.Node):
+    kind = node.kind
+    if kind == "assign":
+        # An initializer cannot refer to the binding it is about to create.
+        expression(scope, node.children[0])
+        node.text = declare(scope, node, node.text)
+    elif kind == "if":
+        expression(scope, node.children[0])
+        block(scope, node.children[1].children)
+        block(scope, node.children[2].children)
+    elif kind == "while":
+        expression(scope, node.children[0])
+        block(scope, node.children[1].children)
+    elif kind == "for":
+        expression(scope, node.children[0])
+        count = len(scope.names)
+        # An active same-name binding intentionally resolves to the same name;
+        # the core checker diagnoses the forbidden loop shadowing.
+        node.text = declare(scope, node, node.text)
+        block(scope, node.children[1].children)
+        restore(scope, count)
+    elif kind == "group":
+        count = len(scope.names)
+        node.text = declare(scope, node, node.text)
+        block(scope, node.children)
+        restore(scope, count)
+    elif kind == "match":
+        expression(scope, node.children[0])
+        for index in range(1, len(node.children)):
+            arm = node.children[index]
+            count = len(scope.names)
+            for field_index in range(len(arm.names)):
+                arm.names[field_index] = declare(scope, arm, arm.names[field_index])
+            block(scope, arm.children)
+            restore(scope, count)
+    else:
+        for child in node.children:
+            expression(scope, child)
+
+fn normalize(program: syntax.Program):
+    globals: list[str] = []
+    for declaration in program.declarations:
+        globals.append(declaration.text)
+    for function in program.declarations:
+        if function.kind == "fn":
+            namespace = ""
+            for index in range(len(function.text)):
+                if function.text[index] == ".":
+                    namespace = function.text[:index + 1]
+            scope = Scope([], 0, namespace, globals)
+            for name in function.names:
+                scope.names.append(Name(name, name))
+            block(scope, function.children)

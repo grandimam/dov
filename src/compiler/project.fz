@@ -15,7 +15,7 @@ fn test(compiler: str, directory: str):
     if str.contains(llvm, "/"):
         llvm = fs.canonical(llvm)
     sys.set_env("FAZ_CLANG", llvm)
-    toolchain.invoke(compiler, ["build", directory + "/tests/main.fz", "-o", runner])
+    toolchain.invoke(compiler, ["build", directory + "/tests/main.fz", "--legacy-language", "-o", runner])
     status = sys.run(runner, [compiler, directory])
     sys.set_env("FAZ_CLANG", configured)
     fs.remove_temp(temporary)
@@ -23,7 +23,13 @@ fn test(compiler: str, directory: str):
         toolchain.error("Faz conformance tests failed (status " + str(status) + ")")
 
 fn stage(compiler: str, source: str, output: str):
-    toolchain.invoke(compiler, ["emit-llvm", source, "-o", output + ".ll"])
+    arguments = ["emit-llvm", source, "-o", output + ".ll"]
+    # The checked-in transition seed predates the explicit compatibility flag.
+    # Probe capability only for that first producer; later stages opt in.
+    capabilities = sys.capture(compiler, ["--help"], 60000)
+    if str.contains(capabilities[1], "--legacy-language"):
+        arguments.append("--legacy-language")
+    toolchain.invoke(compiler, arguments)
     toolchain.native(output + ".ll", output)
 
 fn bootstrap(directory: str, verify: bool, refresh: bool):
@@ -46,7 +52,7 @@ fn bootstrap(directory: str, verify: bool, refresh: bool):
     stage(output + "/faz-bootstrap-a", source, output + "/faz-bootstrap-b")
     stage(output + "/faz-bootstrap-b", source, output + "/faz-stage1")
     stage(output + "/faz-stage1", source, output + "/faz-stage2")
-    toolchain.invoke(output + "/faz-stage2", ["emit-llvm", source, "-o", output + "/stage3.ll"])
+    toolchain.invoke(output + "/faz-stage2", ["emit-llvm", source, "--legacy-language", "-o", output + "/stage3.ll"])
     emitted = fs.read_text(output + "/faz-stage2.ll")
     if emitted != fs.read_text(output + "/stage3.ll"):
         toolchain.error("bootstrap mismatch: compiler generations emitted different LLVM IR")
@@ -56,7 +62,7 @@ fn bootstrap(directory: str, verify: bool, refresh: bool):
         test(output + "/faz-stage2", directory)
         for platform in ["darwin", "linux"]:
             generated = output + "/seed-" + platform + ".ll"
-            toolchain.invoke(output + "/faz-stage2", ["emit-llvm", source, "--platform", platform, "-o", generated])
+            toolchain.invoke(output + "/faz-stage2", ["emit-llvm", source, "--legacy-language", "--platform", platform, "-o", generated])
             destination = directory + "/bootstrap/seed-" + platform + ".ll"
             if refresh:
                 fs.write_text(destination, fs.read_text(generated))
@@ -64,7 +70,7 @@ fn bootstrap(directory: str, verify: bool, refresh: bool):
                 toolchain.error("the " + platform + " seed is stale; run faz refresh-seed")
         if refresh:
             toolchain.native(seed, output + "/faz-seed")
-            toolchain.invoke(output + "/faz-seed", ["emit-llvm", source, "-o", output + "/seed-check.ll"])
+            toolchain.invoke(output + "/faz-seed", ["emit-llvm", source, "--legacy-language", "-o", output + "/seed-check.ll"])
             if emitted != fs.read_text(output + "/seed-check.ll"):
                 toolchain.error("refreshed seed did not reproduce the verified compiler")
     fs.copy_executable(output + "/faz-stage2", directory + "/build/faz")

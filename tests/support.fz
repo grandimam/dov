@@ -40,6 +40,22 @@ fn capture(executable: str, args: list[str]) -> Result:
     values = sys.capture(executable, args, 60000)
     return Result(number(values[0]), values[1], values[2])
 
+# Explicit adapter for the pre-0.1 regression corpus. Core language tests use
+# capture directly and never inherit this compatibility mode.
+fn legacy_arguments(args: list[str]) -> list[str]:
+    if len(args) < 2:
+        return args
+    command = args[0]
+    if command != "build" and command != "run" and command != "check" and command != "emit-llvm":
+        return args
+    result = [args[0], args[1], "--legacy-language"]
+    for index in range(2, len(args)):
+        result.append(args[index])
+    return result
+
+fn capture_legacy(executable: str, args: list[str]) -> Result:
+    return capture(executable, legacy_arguments(args))
+
 fn success(s: Suite, result: Result, expected: str, name: str):
     check(s, result.status == 0 and result.out == expected, name, "status " + str(result.status) + "\n" + result.out + result.err)
 
@@ -51,7 +67,7 @@ fn build(s: Suite, source: str, output: str):
     stats = sys.env("FAZ_GC_STATS")
     sys.set_env("FAZ_GC_STRESS", "0")
     sys.set_env("FAZ_GC_STATS", "0")
-    result = capture(s.compiler, ["build", source, "-o", output])
+    result = capture_legacy(s.compiler, ["build", source, "-o", output])
     sys.set_env("FAZ_GC_STRESS", stress)
     sys.set_env("FAZ_GC_STATS", stats)
     check(s, result.status == 0, "build " + source, result.out + result.err)
@@ -75,7 +91,7 @@ fn reject(s: Suite, code: str, diagnostic: str) -> Result:
     directory = fresh()
     path = directory + "/main.fz"
     fs.write_text(path, code)
-    result = capture(s.compiler, ["check", path])
+    result = capture_legacy(s.compiler, ["check", path])
     check(s, result.status != 0 and contains(result.err, ".fz:") and contains(result.err, diagnostic), "reject " + diagnostic, result.out + result.err)
     fs.remove_temp(directory)
     return result

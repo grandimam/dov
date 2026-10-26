@@ -25,7 +25,7 @@ fn has(items: list[str], name: str) -> bool:
             return True
     return False
 
-fn copy(items: list[str]) -> list[str]:
+fn copy_names(items: list[str]) -> list[str]:
     out: list[str] = []
     for index in range(len(items)):
         out.append(items[index])
@@ -267,6 +267,10 @@ fn builtin(g: Checker, n: syntax.Node) -> str:
         return method(g, n, named(g, n, name[:len(name) - 7]), "append", args)
     if suffix(name, ".pop"):
         return method(g, n, named(g, n, name[:len(name) - 4]), "pop", args)
+    if name == "copy":
+        if len(args) != 1:
+            fail(n, "copy expects one value")
+        return expression(g, args[0], "")
     if name == "range":
         fail(n, "range is supported only as a for-loop iterable")
     if name == "str.byte_len" or name == "str.byte_at" or name == "str.join" or name == "str.contains":
@@ -470,8 +474,8 @@ fn expression(g: Checker, n: syntax.Node, hint: str) -> str:
                 return ty
         if n.text == "print":
             for arg in n.children:
-                if not has(["int", "str", "bool"], expression(g, arg, "")):
-                    fail(n, "print accepts int, str, or bool values")
+                if expression(g, arg, "") == "None":
+                    fail(n, "print requires a value, got None")
             return "None"
         if fi < 0 or g.program.declarations[fi].kind != "fn":
             fail(n, "unknown function '" + n.text + "'")
@@ -494,6 +498,8 @@ fn expression(g: Checker, n: syntax.Node, hint: str) -> str:
             return "bool"
         right = expression(g, n.children[1], "")
         expect(n, right, left)
+        if (op == "==" or op == "!=") and managed(left):
+            return "bool"
         if not has(["int", "bool", "str"], left):
             fail(n, "operator requires scalar values")
         if op == "+" and left == "str":
@@ -516,7 +522,7 @@ fn block(g: Checker, body: list[syntax.Node]) -> bool:
     return falls
 
 fn for_loop(g: Checker, n: syntax.Node):
-    before = copy(g.assigned)
+    before = copy_names(g.assigned)
     iterable = n.children[0]
     if iterable.kind == "call" and iterable.text == "range":
         if has(g.declared, "range") or position(g.bindings, "range") >= 0:
@@ -547,14 +553,14 @@ fn match_statement(g: Checker, n: syntax.Node) -> bool:
     variants = g.program.declarations[ti].children
     seen: list[str] = []
     wildcard = False
-    before = copy(g.assigned)
+    before = copy_names(g.assigned)
     merged: list[str] = []
     exits = 0
     for ai in range(1, len(n.children)):
         arm = n.children[ai]
         if wildcard:
             fail(arm, "unreachable case after wildcard")
-        g.assigned = copy(before)
+        g.assigned = copy_names(before)
         previous_bindings = len(g.bindings)
         if arm.text == "_":
             if len(seen) == len(variants):
@@ -583,7 +589,7 @@ fn match_statement(g: Checker, n: syntax.Node) -> bool:
                     g.bindings.append(Binding(name, variant.types[i]))
         if block(g, arm.children):
             if exits == 0:
-                merged = copy(g.assigned)
+                merged = copy_names(g.assigned)
             else:
                 merged = intersect(merged, g.assigned)
             exits = exits + 1
@@ -613,6 +619,12 @@ fn statement(g: Checker, n: syntax.Node) -> bool:
             validate(g.program, n, n.type_name)
             expect(n, ty, n.type_name)
         bind(g, n, n.text, ty)
+    elif kind == "augment":
+        target = n.children[0]
+        ty = expression(g, target, "")
+        expect(n, expression(g, n.children[1], ty), ty)
+        if ty != "int" and not (ty == "str" and n.text == "+"):
+            fail(n, "compound assignment requires int or string addition")
     elif kind == "set_field":
         base = expression(g, n.children[0], "")
         ty = field(g, n, base, n.text)
@@ -646,9 +658,9 @@ fn statement(g: Checker, n: syntax.Node) -> bool:
         return False
     elif kind == "if":
         expect(n, expression(g, n.children[0], "bool"), "bool")
-        before = copy(g.assigned)
+        before = copy_names(g.assigned)
         yes = block(g, n.children[1].children)
-        yes_assigned = copy(g.assigned)
+        yes_assigned = copy_names(g.assigned)
         g.assigned = before
         no = block(g, n.children[2].children)
         if yes and no:
@@ -666,7 +678,7 @@ fn statement(g: Checker, n: syntax.Node) -> bool:
         g.groups.pop()
         return falls
     elif kind == "while":
-        before = copy(g.assigned)
+        before = copy_names(g.assigned)
         expect(n, expression(g, n.children[0], "bool"), "bool")
         g.loops = g.loops + 1
         block(g, n.children[1].children)
@@ -682,15 +694,16 @@ fn statement(g: Checker, n: syntax.Node) -> bool:
         fail(n, "unknown statement '" + kind + "'")
     return True
 
-fn function(p: syntax.Program, n: syntax.Node, internal: bool):
+fn function(p: syntax.Program, n: syntax.Node, internal: bool) -> Checker:
     locals: list[Binding] = []
     for i in range(len(n.names)):
         locals.append(Binding(n.names[i], n.types[i]))
-    declared = copy(n.names)
+    declared = copy_names(n.names)
     collect_locals(n.children, declared)
-    g = Checker(p, locals, [], copy(n.names), declared, [], 0, n.type_name, internal)
+    g = Checker(p, locals, [], copy_names(n.names), declared, [], 0, n.type_name, internal)
     if block(g, n.children) and n.type_name != "None":
         fail(n, "function '" + n.text + "' must return " + n.type_name + " on every path")
+    return g
 
 fn validate_program(program: syntax.Program, require_main: bool):
     declarations(program, require_main)
@@ -703,3 +716,424 @@ fn check(program: syntax.Program):
 
 fn check_library(program: syntax.Program):
     validate_program(program, False)
+
+# Core-language access checking. The legacy type checker remains independently
+# available to bootstrap the existing compiler during the explicit migration.
+struct CoreBinding:
+    name: str
+    ty: str
+    mutable: bool
+    borrowed: bool
+    moved: bool
+    depth: int
+
+struct CoreChecker:
+    types: Checker
+    variables: list[CoreBinding]
+    depth: int
+    loop_depth: int
+    readers: list[str]
+    writers: list[str]
+    function_node: syntax.Node
+
+fn core_aggregate(ty: str) -> bool:
+    return managed(ty) and ty != "str"
+
+fn core_position(c: CoreChecker, name: str) -> int:
+    i = len(c.variables) - 1
+    while i >= 0:
+        if c.variables[i].name == name:
+            return i
+        i = i - 1
+    return -1
+
+fn core_path(n: syntax.Node) -> str:
+    if n.kind == "name":
+        return n.text
+    if n.kind == "field":
+        base = core_path(n.children[0])
+        if base != "":
+            return base + "." + n.text
+    if n.kind == "index":
+        base = core_path(n.children[0])
+        if base != "":
+            return base + "[]"
+    return ""
+
+fn core_root(path: str) -> str:
+    for i in range(len(path)):
+        if path[i] == "." or path[i] == "[":
+            return path[:i]
+    return path
+
+fn core_overlap(a: str, b: str) -> bool:
+    if a == "" or b == "" or core_root(a) != core_root(b):
+        return False
+    # Index disjointness is intentionally conservative, even for constants.
+    for i in range(len(a)):
+        if a[i] == "[":
+            a = a[:i]
+            break
+    for i in range(len(b)):
+        if b[i] == "[":
+            b = b[:i]
+            break
+    if a == b:
+        return True
+    if len(a) < len(b):
+        return b[:len(a)] == a and b[len(a)] == "."
+    return a[:len(b)] == b and a[len(b)] == "."
+
+fn core_type(c: CoreChecker, n: syntax.Node) -> str:
+    return expression(c.types, n, "")
+
+fn core_access(c: CoreChecker, n: syntax.Node, path: str, write: bool):
+    if path == "":
+        if write:
+            fail(n, "mutable access requires an owned variable or field")
+        return
+    i = core_position(c, core_root(path))
+    if i < 0:
+        fail(n, "name '" + core_root(path) + "' is outside its lexical scope")
+    binding = c.variables[i]
+    if binding.moved:
+        fail(n, "use of moved value '" + binding.name + "'")
+    if write and not binding.mutable:
+        fail(n, "cannot mutate immutable value '" + binding.name + "'")
+    for loan in c.writers:
+        if core_overlap(path, loan):
+            fail(n, "access conflicts with exclusive mutable access to '" + loan + "'")
+    if write:
+        for loan in c.readers:
+            if core_overlap(path, loan):
+                fail(n, "mutable access conflicts with read-only access to '" + loan + "'")
+
+fn core_named_node(n: syntax.Node, path: str) -> syntax.Node:
+    end = 0
+    while end < len(path) and path[end] != ".":
+        end = end + 1
+    node = syntax.node("name", path[:end], n.line, n.column, n.source)
+    while end < len(path):
+        start = end + 1
+        end = start
+        while end < len(path) and path[end] != ".":
+            end = end + 1
+        field_node = syntax.node("field", path[start:end], n.line, n.column, n.source)
+        field_node.children.append(node)
+        node = field_node
+    return node
+
+# Evaluate address computations without borrowing the whole parent of a field.
+fn core_place_effects(c: CoreChecker, n: syntax.Node):
+    if n.kind == "field":
+        core_place_effects(c, n.children[0])
+    elif n.kind == "index":
+        core_place_effects(c, n.children[0])
+        core_value(c, n.children[1])
+    elif n.kind != "name":
+        core_value(c, n)
+
+# Result categories: scalar=0, fresh owned=1, immutable shared=2,
+# movable owner=3, temporary borrow=4.
+fn core_value(c: CoreChecker, n: syntax.Node) -> int:
+    kind = n.kind
+    if kind == "name" or kind == "field" or kind == "index":
+        core_place_effects(c, n)
+        path = core_path(n)
+        core_access(c, n, path, False)
+        ty = core_type(c, n)
+        if not core_aggregate(ty):
+            return 0
+        if path == "":
+            return 4
+        binding = c.variables[core_position(c, core_root(path))]
+        if binding.borrowed:
+            return 4
+        if not binding.mutable:
+            return 2
+        if kind == "name":
+            return 3
+        return 4
+    if kind == "list":
+        mode = 1
+        for item in n.children:
+            value = core_value(c, item)
+            if value == 2:
+                mode = 2
+            if value == 4:
+                fail(item, "borrowed aggregate cannot escape into a collection; use copy")
+            if value == 3:
+                core_move(c, item)
+        return mode
+    if kind == "method":
+        receiver = n.children[0]
+        core_value(c, receiver)
+        core_access(c, n, core_path(receiver), True)
+        path = core_path(receiver)
+        c.writers.append(path)
+        for i in range(1, len(n.children)):
+            core_store(c, n.children[i], True)
+        c.writers.pop()
+        if n.text == "pop" and core_aggregate(core_type(c, n)):
+            return 1
+        return 0
+    if kind == "call":
+        if n.text == "copy":
+            core_value(c, n.children[0])
+            if core_aggregate(core_type(c, n)):
+                return 1
+            return 0
+        if (suffix(n.text, ".append") or suffix(n.text, ".pop")) and declaration(c.types.program, n.text) < 0:
+            end = len(n.text) - 4
+            if suffix(n.text, ".append"):
+                end = len(n.text) - 7
+            receiver = core_named_node(n, n.text[:end])
+            core_value(c, receiver)
+            path = core_path(receiver)
+            core_access(c, n, path, True)
+            c.writers.append(path)
+            for arg in n.children:
+                core_store(c, arg, True)
+            c.writers.pop()
+            if suffix(n.text, ".pop") and core_aggregate(core_type(c, n)):
+                return 1
+            return 0
+        fi = declaration(c.types.program, n.text)
+        if fi >= 0 and c.types.program.declarations[fi].kind == "fn":
+            fn_node = c.types.program.declarations[fi]
+            reader_count = len(c.readers)
+            writer_count = len(c.writers)
+            for i in range(len(n.children)):
+                arg = n.children[i]
+                core_value(c, arg)
+                path = core_path(arg)
+                write = has(fn_node.mutable_names, fn_node.names[i])
+                core_access(c, arg, path, write)
+                if write:
+                    c.writers.append(path)
+                elif path != "":
+                    c.readers.append(path)
+            while len(c.readers) > reader_count:
+                c.readers.pop()
+            while len(c.writers) > writer_count:
+                c.writers.pop()
+            if core_aggregate(fn_node.type_name):
+                if fn_node.mutable:
+                    return 2
+                return 1
+            return 0
+        # Constructors own their fields. Builtins only borrow their inputs.
+        constructor = fi >= 0 and c.types.program.declarations[fi].kind == "struct"
+        result_declaration = declaration(c.types.program, core_type(c, n))
+        if result_declaration >= 0 and c.types.program.declarations[result_declaration].kind == "enum":
+            constructor = True
+        mode = 1
+        if suffix(n.text, ".spawn") or n.text == "http.serve":
+            if len(n.children) > 0:
+                callback_index = 0
+                if n.text == "http.serve":
+                    callback_index = 2
+                callback = declaration(c.types.program, n.children[callback_index].text)
+                if callback >= 0 and len(c.types.program.declarations[callback].mutable_names) > 0:
+                    fail(n, "mutable parameters are not supported on task or HTTP callbacks")
+        builtin_reader_count = len(c.readers)
+        for ai in range(len(n.children)):
+            arg = n.children[ai]
+            callback_argument = (suffix(n.text, ".spawn") and ai == 0) or (n.text == "http.serve" and ai == 2)
+            # Only the explicitly typed callback position denotes a function.
+            if callback_argument and arg.kind == "name" and core_position(c, arg.text) < 0 and declaration(c.types.program, arg.text) >= 0:
+                pass
+            else:
+                value = core_value(c, arg)
+                if constructor:
+                    if value == 2:
+                        mode = 2
+                    elif value == 3:
+                        core_move(c, arg)
+                    elif value == 4:
+                        fail(arg, "borrowed aggregate cannot escape into a struct; use copy")
+                elif core_path(arg) != "":
+                    c.readers.append(core_path(arg))
+        while len(c.readers) > builtin_reader_count:
+            c.readers.pop()
+        if core_aggregate(core_type(c, n)):
+            return mode
+        return 0
+    if kind == "binary" and (n.text == "==" or n.text == "!="):
+        core_value(c, n.children[0])
+        equality_path = core_path(n.children[0])
+        borrowing = equality_path != "" and core_aggregate(core_type(c, n.children[0]))
+        if borrowing:
+            c.readers.append(equality_path)
+        core_value(c, n.children[1])
+        if borrowing:
+            c.readers.pop()
+        return 0
+    for child in n.children:
+        core_value(c, child)
+    return 0
+
+fn core_move(c: CoreChecker, n: syntax.Node):
+    path = core_path(n)
+    i = core_position(c, path)
+    if i < 0 or n.kind != "name":
+        fail(n, "partial moves are not supported; use copy")
+    binding = c.variables[i]
+    core_access(c, n, path, True)
+    if binding.borrowed:
+        fail(n, "cannot move a borrowed parameter; use copy")
+    if c.loop_depth > 0 and binding.depth < c.loop_depth:
+        fail(n, "moving an outer owner inside a loop is not supported; use copy")
+    binding.moved = True
+
+fn core_store(c: CoreChecker, n: syntax.Node, mutable: bool):
+    mode = core_value(c, n)
+    if mode == 4:
+        fail(n, "borrowed aggregate cannot escape; use copy")
+    if mutable and mode == 2:
+        fail(n, "immutable shared value cannot become mutable; use copy")
+    if mode == 3:
+        core_move(c, n)
+
+fn core_snapshot(c: CoreChecker) -> list[bool]:
+    out: list[bool] = []
+    for binding in c.variables:
+        out.append(binding.moved)
+    return out
+
+fn core_restore(c: CoreChecker, state: list[bool]):
+    for i in range(len(state)):
+        c.variables[i].moved = state[i]
+
+fn core_block(c: CoreChecker, body: list[syntax.Node]):
+    before = len(c.variables)
+    c.depth = c.depth + 1
+    for n in body:
+        core_statement(c, n)
+    while len(c.variables) > before:
+        c.variables.pop()
+    c.depth = c.depth - 1
+
+fn core_statement(c: CoreChecker, n: syntax.Node):
+    kind = n.kind
+    if kind == "assign":
+        i = core_position(c, n.text)
+        mutable = n.mutable
+        if i >= 0:
+            binding = c.variables[i]
+            if n.mutable:
+                fail(n, "cannot redeclare or shadow active name '" + n.text + "'")
+            if not binding.mutable:
+                fail(n, "cannot reassign immutable binding '" + n.text + "'")
+            # Reinitialization of a moved owner is intentionally supported.
+            was_moved = binding.moved
+            binding.moved = False
+            core_access(c, n, n.text, True)
+            binding.moved = was_moved
+            mutable = True
+        core_store(c, n.children[0], mutable)
+        if i < 0:
+            ty = c.types.locals[position(c.types.locals, n.text)].ty
+            c.variables.append(CoreBinding(n.text, ty, mutable, False, False, c.depth))
+        else:
+            c.variables[i].moved = False
+    elif kind == "set_field" or kind == "set_index":
+        core_value(c, n.children[0])
+        core_access(c, n, core_path(n.children[0]), True)
+        value_index = 1
+        if kind == "set_index":
+            core_value(c, n.children[1])
+            value_index = 2
+        target_path = core_path(n.children[0]) + "." + n.text
+        if kind == "set_index":
+            target_path = core_path(n.children[0]) + "[]"
+        c.readers.append(target_path)
+        core_store(c, n.children[value_index], True)
+        c.readers.pop()
+    elif kind == "augment":
+        core_value(c, n.children[0])
+        core_access(c, n, core_path(n.children[0]), True)
+        c.readers.append(core_path(n.children[0]))
+        core_value(c, n.children[1])
+        c.readers.pop()
+    elif kind == "if":
+        core_value(c, n.children[0])
+        before = core_snapshot(c)
+        core_block(c, n.children[1].children)
+        yes = core_snapshot(c)
+        core_restore(c, before)
+        core_block(c, n.children[2].children)
+        for i in range(len(yes)):
+            c.variables[i].moved = c.variables[i].moved or yes[i]
+    elif kind == "while" or kind == "for":
+        iterable = n.children[0]
+        loop_state = core_snapshot(c)
+        previous_loop = c.loop_depth
+        c.loop_depth = c.depth + 1
+        variable_count = len(c.variables)
+        reader_count = len(c.readers)
+        if kind == "for":
+            if core_position(c, n.text) >= 0:
+                fail(n, "loop binding cannot shadow active name '" + n.text + "'")
+            if iterable.kind == "call" and iterable.text == "range":
+                for arg in iterable.children:
+                    core_value(c, arg)
+            else:
+                core_value(c, iterable)
+                path = core_path(iterable)
+                if path != "":
+                    c.readers.append(path)
+            ty = c.types.locals[position(c.types.locals, n.text)].ty
+            c.variables.append(CoreBinding(n.text, ty, False, core_aggregate(ty), False, c.depth + 1))
+        else:
+            core_value(c, iterable)
+        core_block(c, n.children[1].children)
+        while len(c.variables) > variable_count:
+            c.variables.pop()
+        while len(c.readers) > reader_count:
+            c.readers.pop()
+        for state_index in range(len(loop_state)):
+            c.variables[state_index].moved = c.variables[state_index].moved or loop_state[state_index]
+        c.loop_depth = previous_loop
+    elif kind == "return":
+        if len(n.children) > 0:
+            mode = core_value(c, n.children[0])
+            if mode == 4:
+                fail(n, "returning a borrowed aggregate is not supported; return copy(value)")
+            if mode == 3:
+                core_move(c, n.children[0])
+            if mode == 2:
+                c.function_node.mutable = True
+    elif kind == "group":
+        c.types.groups.append(n.text)
+        core_block(c, n.children)
+        c.types.groups.pop()
+    elif kind == "match":
+        fail(n, "match ownership semantics are not yet available in core mode; use --legacy-language")
+    else:
+        for child in n.children:
+            core_value(c, child)
+
+fn check_core(program: syntax.Program):
+    for declaration_node in program.declarations:
+        if declaration_node.text == "copy":
+            fail(declaration_node, "copy is a reserved core builtin")
+    # Monotone fixed point propagates shared return values through call chains.
+    for iteration in range(len(program.declarations) + 1):
+        changed = False
+        for n in program.declarations:
+            if n.kind == "fn":
+                was_shared = n.mutable
+                typed = function(program, n, False)
+                typed.assigned = []
+                for local in typed.locals:
+                    typed.assigned.append(local.name)
+                variables: list[CoreBinding] = []
+                for i in range(len(n.names)):
+                    variables.append(CoreBinding(n.names[i], n.types[i], has(n.mutable_names, n.names[i]), core_aggregate(n.types[i]), False, 0))
+                c = CoreChecker(typed, variables, 0, 0, [], [], n)
+                core_block(c, n.children)
+                if n.mutable != was_shared:
+                    changed = True
+        if not changed:
+            return

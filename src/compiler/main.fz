@@ -1,6 +1,7 @@
 import syntax
 import modules
 import semantic
+import scopes
 import llvm_emitter
 import runtime_source
 import runtime_builder
@@ -27,7 +28,8 @@ fn help():
         "  faz --help\n",
         "  faz --version\n\n",
         "Builds require LLVM/Clang. Set FAZ_CLANG to its executable path.\n",
-        "Default build output: build/<source-name>",
+        "Default build output: build/<source-name>\n",
+        "  --legacy-language: explicitly compile pre-0.1 sources (temporary bootstrap compatibility).",
     ], ""))
 
 fn prepare_output(program: syntax.Program, output: str):
@@ -89,6 +91,7 @@ fn main():
     input = args[1]
     output = ""
     has_output = False
+    legacy_language = False
     program_args: list[str] = []
     platform = sys.platform()
     if legacy:
@@ -105,6 +108,9 @@ fn main():
                 while index < len(args):
                     program_args.append(args[index])
                     index = index + 1
+            elif argument == "--legacy-language" and not legacy_language:
+                legacy_language = True
+                index = index + 1
             elif argument == "-o" and (command == "build" or command == "emit-llvm" or command == "emit-llvm-library") and not has_output:
                 index = index + 1
                 if index >= len(args):
@@ -123,6 +129,14 @@ fn main():
             else:
                 error("unexpected argument '" + argument + "'; see faz --help")
     program = modules.load(input)
+    if not legacy_language:
+        scopes.normalize(program)
+        if command == "emit-llvm-library":
+            semantic.check_library(program)
+        else:
+            semantic.check(program)
+        semantic.check_core(program)
+        program.core = True
     if command == "check":
         semantic.check(program)
         print("Checked " + input)

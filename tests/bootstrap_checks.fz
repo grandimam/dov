@@ -129,12 +129,17 @@ fn frontend(s: support.Suite):
     contract = fs.read_text(s.root + "/tests/fixtures/frontend_contract.fz")
     executable = support.source(s, directory, contract)
     support.success(s, no_tools(executable, [s.root]), "frontend contracts passed\n", "frontend AST, precedence, tokens, Unicode, locations and continuations")
+    mutable_contract = support.source(s, directory, fs.read_text(s.root + "/tests/fixtures/frontend_mut_contract.fz"))
+    support.success(s, no_tools(mutable_contract, []), "mutable frontend contracts passed\n", "mutable bindings, parameters, and compound assignment AST")
     executable = support.source(s, directory, fs.read_text(s.root + "/tests/fixtures/frontend_harness.fz"))
     bad = [
         ExpressionCase("fn main():\n    print([1)\n", ":2:13:"),
         ExpressionCase("fn main():\n    print(\n        [1, 2]\n", ":2:10:"),
         ExpressionCase("fn main():\n    ]\n", ":2:5:"),
         ExpressionCase("fn main():\n\tpass\n", ":2:1:"),
+        ExpressionCase("fn main():\n    f(mut x)\n", ":2:7:"),
+        ExpressionCase("enum E:\n    Item(mut x: int)\n", ":2:14:"),
+        ExpressionCase("fn main():\n    mut value += 1\n", ":2:15:"),
     ]
     for item in bad:
         fs.write_text(directory + "/input.fz", item.source)

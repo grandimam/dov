@@ -17,6 +17,8 @@ jobs:
         run: clang -x ir -O2 -Wno-override-module bootstrap/seed-${{ matrix.platform }}.ll -o faz
       - name: Verify self-hosting and native Faz conformance
         run: ./faz verify
+      - name: Verify core value ABI and copy semantics
+        run: ./build/faz run tests/fixtures/core_values.fz
       - run: ./build/faz run examples/fibonacci.fz
       - name: Verify installed compiler
         run: |

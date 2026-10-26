@@ -21,31 +21,31 @@ fn no_faz_temporaries(path: str) -> bool:
 
 fn cli(s: support.Suite):
     for option in ["--help", "-h", "--version"]:
-        result = support.capture(s.compiler, [option])
+        result = support.capture_legacy(s.compiler, [option])
         support.check(s, result.status == 0 and support.contains(result.out + result.err, "faz"), "CLI " + option, result.out + result.err)
-    support.success(s, support.capture(s.compiler, ["--version"]), "faz 0.1.0\n", "Faz version branding")
-    result = support.capture(s.compiler, ["--help"])
+    support.success(s, support.capture_legacy(s.compiler, ["--version"]), "faz 0.1.0\n", "Faz version branding")
+    result = support.capture_legacy(s.compiler, ["--help"])
     support.check(s, support.contains(result.out, "file.fz") and support.contains(result.out, "FAZ_CLANG"), "Faz CLI source and toolchain names", result.out)
-    result = support.capture(s.compiler, [])
+    result = support.capture_legacy(s.compiler, [])
     support.check(s, result.status == 0, "CLI default help", result.err)
     for command in ["nonsense", "check", "build", "run", "emit-llvm"]:
-        result = support.capture(s.compiler, [command])
+        result = support.capture_legacy(s.compiler, [command])
         support.check(s, result.status != 0, "CLI incomplete " + command, result.err)
     directory = support.fresh()
     main = directory + "/main.fz"
     fs.write_text(main, "fn main():\n    print(\"native\")\n")
     original_clang = sys.env("FAZ_CLANG")
     sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
-    result = support.capture(s.compiler, ["check", main])
+    result = support.capture_legacy(s.compiler, ["check", main])
     support.check(s, result.status == 0, "check needs no LLVM tool", result.err)
     sys.set_env("FAZ_CLANG", original_clang)
     emitted = directory + "/out.ll"
-    result = support.capture(s.compiler, ["emit-llvm", main, "-o", emitted])
+    result = support.capture_legacy(s.compiler, ["emit-llvm", main, "-o", emitted])
     support.check(s, result.status == 0 and support.contains(fs.read_text(emitted), "define i32 @main("), "direct LLVM emission", result.err)
-    support.success(s, support.capture(s.compiler, ["run", main]), "native\n", "CLI run")
-    result = support.capture(s.compiler, [main, emitted])
+    support.success(s, support.capture_legacy(s.compiler, ["run", main]), "native\n", "CLI run")
+    result = support.capture_legacy(s.compiler, [main, emitted])
     support.check(s, result.status == 0 and support.contains(fs.read_text(emitted), "define i32 @main("), "three-character extension in positional LLVM emission", result.err)
-    result = support.capture(s.compiler, ["emit-llvm", main, "-o", ".fz"])
+    result = support.capture_legacy(s.compiler, ["emit-llvm", main, "-o", ".fz"])
     support.check(s, result.status != 0 and support.contains(result.err, "refusing to overwrite a .fz source file") and not fs.exists(".fz"), "protect shortest .fz output path", result.err)
     binary = directory + "/out dir/program"
     support.build(s, main, binary)
@@ -54,9 +54,9 @@ fn cli(s: support.Suite):
     support.success(s, support.capture(binary, []), "native\n", "standalone program")
     sys.set_env("PATH", path)
     fs.write_text(main, "fn main():\n    print(str.join(sys.args(), \"|\"))\n")
-    support.success(s, support.capture(s.compiler, ["run", main, "--", "a b", "\"quoted\"", "$HOME;false"]), "a b|\"quoted\"|$HOME;false\n", "literal argument forwarding")
+    support.success(s, support.capture_legacy(s.compiler, ["run", main, "--", "a b", "\"quoted\"", "$HOME;false"]), "a b|\"quoted\"|$HOME;false\n", "literal argument forwarding")
     sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
-    result = support.capture(s.compiler, ["build", main, "-o", directory + "/failed"])
+    result = support.capture_legacy(s.compiler, ["build", main, "-o", directory + "/failed"])
     support.check(s, result.status != 0 and support.contains(result.err, "LLVM"), "LLVM launch failure", result.err)
     sys.set_env("FAZ_CLANG", original_clang)
     fs.write_text(main, "fn value() -> int:\n    sys.exit(17)\nfn main():\n    print(value())\n")
@@ -64,10 +64,10 @@ fn cli(s: support.Suite):
     fs.make_parent(temporary + "/unused")
     tmp = sys.env("TMPDIR")
     sys.set_env("TMPDIR", temporary)
-    result = support.capture(s.compiler, ["run", main])
+    result = support.capture_legacy(s.compiler, ["run", main])
     support.check(s, result.status == 17 and no_faz_temporaries(temporary), "run exit and temp cleanup", result.err)
     sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
-    result = support.capture(s.compiler, ["build", main, "-o", directory + "/failed"])
+    result = support.capture_legacy(s.compiler, ["build", main, "-o", directory + "/failed"])
     support.check(s, result.status != 0 and no_faz_temporaries(temporary), "build failure temp cleanup", result.err)
     sys.set_env("FAZ_CLANG", original_clang)
     sys.set_env("TMPDIR", tmp)
@@ -82,7 +82,7 @@ fn cli(s: support.Suite):
         fs.symlink(resolved, spaced)
         sys.set_env("FAZ_CLANG", spaced)
         fs.write_text(main, "fn main():\n    print(42)\n")
-        support.success(s, support.capture(s.compiler, ["run", main]), "42\n", "LLVM path with spaces")
+        support.success(s, support.capture_legacy(s.compiler, ["run", main]), "42\n", "LLVM path with spaces")
         sys.set_env("FAZ_CLANG", original_clang)
     keep = directory + "/keep.fz"
     fs.write_text(keep, "# keep\n")
@@ -91,7 +91,7 @@ fn cli(s: support.Suite):
     fs.symlink(main, alias)
     for command in ["build", "emit-llvm"]:
         for output in [main, keep, alias]:
-            result = support.capture(s.compiler, [command, main, "-o", output])
+            result = support.capture_legacy(s.compiler, [command, main, "-o", output])
             support.check(s, result.status != 0, "protect source " + output, result.err)
     support.check(s, fs.read_text(main) == "fn main():\n    print(42)\n" and fs.read_text(keep) == "# keep\n", "source preservation", main)
     empty = directory + "/empty.fz"
@@ -99,12 +99,12 @@ fn cli(s: support.Suite):
     fs.write_text(main, "import empty\nfn main():\n    pass\n")
     dependency = directory + "/dependency.ll"
     fs.symlink(empty, dependency)
-    result = support.capture(s.compiler, ["emit-llvm", main, "-o", dependency])
+    result = support.capture_legacy(s.compiler, ["emit-llvm", main, "-o", dependency])
     support.check(s, result.status != 0 and fs.read_text(empty) == "", "protect empty imported module", result.err)
     fs.write_text(main, "fn main():\n    print(missing)\n")
     existing = directory + "/existing.ll"
     fs.write_text(existing, "preserve me\n")
-    result = support.capture(s.compiler, ["emit-llvm", main, "-o", existing])
+    result = support.capture_legacy(s.compiler, ["emit-llvm", main, "-o", existing])
     support.check(s, result.status != 0 and fs.read_text(existing) == "preserve me\n", "preserve output on source error", result.err)
     standalone = directory + "/standalone-faz"
     fs.copy_executable(s.compiler, standalone)

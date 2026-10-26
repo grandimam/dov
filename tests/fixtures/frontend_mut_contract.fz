@@ -1,0 +1,28 @@
+# Run against the compiler frontend modules (copied beside this fixture by tests).
+import syntax
+import lexer
+import parser
+
+fn main():
+    program = parser.parse("fn increment(mut value: int, step: int):\n    value += step\nfn main():\n    mut count = 0\n    mut items: list[int] = [1]\n    count += 2\n    count -= 1\n    items[0] *= 3\n    count //= 2\n    count %= 2\n    point.x += 1\n", "mutable.fz")
+    increment = program.declarations[0]
+    assert increment.names[0] == "value" and increment.names[1] == "step"
+    assert len(increment.mutable_names) == 1 and increment.mutable_names[0] == "value"
+    assert increment.types[0] == "int" and increment.types[1] == "int"
+    assert increment.children[0].kind == "augment"
+    assert increment.children[0].text == "+"
+    assert increment.children[0].children[0].kind == "name"
+    body = program.declarations[1].children
+    assert body[0].kind == "assign" and body[0].mutable
+    assert body[0].text == "count"
+    assert body[1].mutable and body[1].type_name == "list[int]"
+    assert body[2].kind == "augment" and body[2].text == "+"
+    assert body[3].kind == "augment" and body[3].text == "-"
+    assert body[4].kind == "augment" and body[4].text == "*"
+    assert body[4].children[0].kind == "index"
+    assert body[5].text == "//" and body[6].text == "%"
+    assert body[7].children[0].kind == "field"
+    immutable = parser.parse("fn f(value: int):\n    count = value\n", "immutable.fz")
+    assert len(immutable.declarations[0].mutable_names) == 0
+    assert not immutable.declarations[0].children[0].mutable
+    print("mutable frontend contracts passed")

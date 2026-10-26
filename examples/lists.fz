@@ -1,5 +1,5 @@
 fn main():
-    plans = ["learn Faz", "make something silly"]
+    mut plans = ["learn Faz", "make something silly"]
     plans.append("take a break")
 
     for plan in plans:

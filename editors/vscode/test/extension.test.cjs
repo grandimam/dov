@@ -117,3 +117,15 @@ test('foundation snippets cover declarations, iteration, matching, and builtins'
     assert.ok(snippet.body.every(line => !line.includes('\t')));
   }
 });
+
+
+test('core language mutation and copying are highlighted', () => {
+  const pattern = name => new RegExp(grammar.patterns.find(p => p.name === name).match);
+  assert.ok(pattern('storage.modifier.mutable.faz').test('mut value = 0'));
+  assert.ok(!pattern('storage.modifier.mutable.faz').test('mutant'));
+  assert.ok(pattern('support.function.builtin.faz').test('copy('));
+  for (const operator of ['+=', '-=', '*=', '//=', '%=']) {
+    assert.equal(operator.match(pattern('keyword.operator.faz'))[0], operator);
+  }
+  assert.ok(Object.values(read('snippets/faz.json')).some(s => s.prefix === 'mut'));
+});

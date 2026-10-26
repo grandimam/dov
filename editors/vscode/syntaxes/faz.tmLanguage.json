@@ -36,6 +36,10 @@
       }
     },
     {
+      "name": "storage.modifier.mutable.faz",
+      "match": "\\bmut\\b"
+    },
+    {
       "name": "keyword.control.faz",
       "match": "\\b(?:return|if|elif|else|while|for|in|break|continue|pass|with|as|match|case|assert|import)\\b"
     },
@@ -49,7 +53,7 @@
     },
     {
       "name": "support.function.builtin.faz",
-      "match": "\\b(?:print|len|panic|str(?:\\.join)?|range|task\\.(?:group|sleep|yield)|http\\.serve|fs\\.(?:read_text|write_text|canonical|exists)|sys\\.args)(?=\\s*\\()"
+      "match": "\\b(?:print|copy|len|panic|str(?:\\.join)?|range|task\\.(?:group|sleep|yield)|http\\.serve|fs\\.(?:read_text|write_text|canonical|exists)|sys\\.args)(?=\\s*\\()"
     },
     {
       "name": "support.type.faz",
@@ -65,7 +69,7 @@
     },
     {
       "name": "keyword.operator.faz",
-      "match": "->|==|!=|<=|>=|//|[+*%<>=-]"
+      "match": "//=|\\+=|-=|\\*=|%=|->|==|!=|<=|>=|//|[+*%<>=-]"
     },
     {
       "name": "punctuation.separator.faz",

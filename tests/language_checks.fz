@@ -9,7 +9,7 @@ fn fixtures(s: support.Suite):
                 directory = support.fresh()
                 fs.write_text(directory + "/helper.fz", code)
                 fs.write_text(directory + "/main.fz", "import helper\nfn main():\n    pass\n")
-                result = support.capture(s.compiler, ["check", directory + "/main.fz"])
+                result = support.capture_legacy(s.compiler, ["check", directory + "/main.fz"])
                 support.check(s, result.status != 0 and support.contains(result.err, fixture.expected) and support.contains(result.err, "helper.fz:"), fixture.file, result.err)
                 fs.remove_temp(directory)
             else:
@@ -84,7 +84,7 @@ fn conformance(s: support.Suite):
     for name in fs.entries(invalid):
         if support.ends(name, ".fz"):
             count = count + 1
-            result = support.capture(s.compiler, ["check", invalid + "/" + name])
+            result = support.capture_legacy(s.compiler, ["check", invalid + "/" + name])
             support.check(s, result.status != 0 and support.contains(result.err, name), "invalid conformance " + name, result.err)
     support.check(s, count >= 30, "full invalid conformance corpus", str(count))
     fs.remove_temp(directory)

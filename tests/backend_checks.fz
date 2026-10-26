@@ -1,0 +1,109 @@
+# Backend regressions intentionally run in the legacy compiler harness. The
+# private service is not a public FFI and is rejected by core semantic checks.
+import support
+import cli_checks
+
+fn trim(text: str) -> str:
+    end = len(text)
+    while end > 0 and (text[end - 1] == "\n" or text[end - 1] == "\r"):
+        end = end - 1
+    return text[:end]
+
+fn run(s: support.Suite):
+    directory = support.fresh()
+    fs.write_text(directory + "/toolchain.fz", fs.read_text(s.root + "/src/compiler/toolchain.fz"))
+    driver_source = "import toolchain\nfn main():\n    args = sys.args()\n    if args[0] == \"library\":\n        print(toolchain.library())\n    elif args[0] == \"linker\":\n        print(toolchain.linker())\n    elif args[0] == \"repeat\":\n        for i in range(12):\n            result = sys._llvm_object(toolchain.library(), args[1], args[2], toolchain.target(), 2)\n            assert str.contains(result, \"invalid IR\")\n        toolchain.object(args[3], args[2])\n        print(\"recovered\")\n    elif args[0] == \"object\":\n        toolchain.object(args[1], args[2])\n"
+    fs.write_text(directory + "/driver.fz", driver_source)
+    driver = directory + "/backend-driver"
+    support.build(s, directory + "/driver.fz", driver)
+    library = trim(support.capture(driver, ["library"]).out)
+    linker = trim(support.capture(driver, ["linker"]).out)
+    original_library = sys.env("FAZ_LLVM_LIBRARY")
+    original_linker = sys.env("FAZ_LINKER")
+    original_clang = sys.env("FAZ_CLANG")
+    original_cc = sys.env("CC")
+    original_path = sys.env("PATH")
+    original_opt = sys.env("FAZ_OPT_LEVEL")
+    original_stress = sys.env("FAZ_GC_STRESS")
+    original_stats = sys.env("FAZ_GC_STATS")
+    input = directory + "/input.fz"
+    binary = directory + "/native program"
+    fs.write_text(input, "fn main():\n    print(42)\n")
+    sys.set_env("PATH", "")
+    sys.set_env("FAZ_CLANG", "/missing/clang")
+    sys.set_env("CC", "/missing/cc")
+    support.success(s, support.capture(s.compiler, ["run", input]), "42\n", "native build and run without clang or PATH")
+    sys.set_env("PATH", original_path)
+    sys.set_env("FAZ_CLANG", original_clang)
+    sys.set_env("CC", original_cc)
+    # A linker spy accepts native objects only, then invokes the real linker.
+    spy_code = "fn main():\n    args = sys.args()\n    object = False\n    for arg in args:\n        assert not str.contains(arg, \".ll\")\n        assert arg != \"-x\"\n        if len(arg) > 2 and arg[-2:] == \".o\":\n            object = True\n    assert object\n    fs.write_text(sys.env(\"FAZ_LINK_TEST_LOG\"), \"objects only\")\n    sys.exit(sys.run(sys.env(\"FAZ_REAL_LINKER\"), args))\n"
+    fs.write_text(directory + "/spy.fz", spy_code)
+    spy = directory + "/linker with spaces"
+    support.build(s, directory + "/spy.fz", spy)
+    sys.set_env("FAZ_REAL_LINKER", linker)
+    sys.set_env("FAZ_LINK_TEST_LOG", directory + "/link.log")
+    sys.set_env("FAZ_LINKER", spy)
+    support.success(s, support.capture(s.compiler, ["run", input]), "42\n", "linker with spaces receives objects")
+    support.check(s, fs.exists(directory + "/link.log") and fs.read_text(directory + "/link.log") == "objects only", "no external IR codegen", "")
+    sys.set_env("FAZ_LINKER", original_linker)
+    # Explicit overrides fail rather than silently falling back to a driver.
+    sys.set_env("FAZ_LLVM_LIBRARY", "/missing/libLLVM")
+    result = support.capture(s.compiler, ["build", input, "-o", binary])
+    support.check(s, result.status != 0 and support.contains(result.err, "cannot load shared library"), "missing LLVM diagnostic", result.err)
+    result = support.capture(s.compiler, ["check", input])
+    support.check(s, result.status == 0, "check without LLVM library", result.err)
+    result = support.capture(s.compiler, ["emit-llvm", input, "-o", directory + "/valid.ll"])
+    support.check(s, result.status == 0, "IR emission without LLVM library", result.err)
+    incompatible = "libc.so.6"
+    if sys.platform() == "darwin":
+        incompatible = "/usr/lib/libSystem.B.dylib"
+    sys.set_env("FAZ_LLVM_LIBRARY", incompatible)
+    result = support.capture(s.compiler, ["build", input, "-o", binary])
+    support.check(s, result.status != 0 and support.contains(result.err, "missing C API symbol"), "incompatible LLVM diagnostic", result.err)
+    sys.set_env("FAZ_LLVM_LIBRARY", library)
+    spaced_library = directory + "/LLVM library with spaces"
+    fs.symlink(library, spaced_library)
+    sys.set_env("FAZ_LLVM_LIBRARY", spaced_library)
+    support.success(s, support.capture(s.compiler, ["run", input]), "42\n", "LLVM library path with spaces")
+    sys.set_env("FAZ_LLVM_LIBRARY", library)
+    fs.write_text(directory + "/bad.ll", "not valid LLVM IR\n")
+    result = support.capture(driver, ["repeat", directory + "/bad.ll", directory + "/probe.o", directory + "/valid.ll"])
+    support.success(s, result, "recovered\n", "repeated LLVM parse failures release resources and recover")
+    result = support.capture(driver, ["object", directory + "/valid.ll", directory + "/absent/out.o"])
+    support.check(s, result.status != 0 and support.contains(result.err, "cannot emit object"), "object output error", result.err)
+    fs.write_text(directory + "/invalid.ll", "define i32 @main() { entry: br label %join\n other: br label %join\n join: %value = phi i32 [0, %entry]\n ret i32 %value\n}\n")
+    result = support.capture(driver, ["object", directory + "/invalid.ll", directory + "/invalid.o"])
+    support.check(s, result.status != 0 and support.contains(result.err, "IR verification failed"), "LLVM verifier rejects malformed module", result.err)
+    temporary = directory + "/temps"
+    fs.make_parent(temporary + "/unused")
+    original_tmp = sys.env("TMPDIR")
+    sys.set_env("TMPDIR", temporary)
+    sys.set_env("FAZ_LINKER", "/missing/linker")
+    result = support.capture(s.compiler, ["build", input, "-o", binary])
+    support.check(s, result.status != 0 and support.contains(result.err, "native linker") and cli_checks.no_faz_temporaries(temporary), "link failure and temporary cleanup", result.err)
+    sys.set_env("FAZ_LINKER", original_linker)
+    sys.set_env("TMPDIR", original_tmp)
+    fs.write_text(binary, "preserve me")
+    sys.set_env("FAZ_OPT_LEVEL", "invalid")
+    result = support.capture(s.compiler, ["build", input, "-o", binary])
+    support.check(s, result.status != 0 and fs.read_text(binary) == "preserve me", "invalid optimization preserves output", result.err)
+    for level in ["0", "2", "3"]:
+        sys.set_env("FAZ_OPT_LEVEL", level)
+        result = support.capture(s.compiler, ["build", s.root + "/tests/fixtures/core_values.fz", "-o", binary])
+        support.check(s, result.status == 0, "direct LLVM optimization " + level, result.err)
+        if result.status == 0:
+            sys.set_env("FAZ_GC_STRESS", "1")
+            sys.set_env("FAZ_GC_STATS", "1")
+            result = support.capture(binary, [])
+            sys.set_env("FAZ_GC_STRESS", original_stress)
+            sys.set_env("FAZ_GC_STATS", original_stats)
+            support.success(s, result, "core values passed\n", "direct LLVM core ABI and GC " + level)
+            support.check(s, support.stat_value(result.err, "live") == 0, "direct LLVM GC fully reclaimed " + level, result.err)
+    sys.set_env("FAZ_OPT_LEVEL", original_opt)
+    sys.set_env("FAZ_LLVM_LIBRARY", original_library)
+    # Normal user programs cannot call the private compiler adapter.
+    fs.write_text(input, "fn main():\n    print(sys._llvm_object(\"\", \"\", \"\", \"\", 2))\n")
+    result = support.capture(s.compiler, ["check", input])
+    support.check(s, result.status != 0 and support.contains(result.err, "private compiler backend"), "backend is not general user FFI", result.err)
+    fs.remove_temp(directory)

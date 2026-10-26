@@ -6,13 +6,26 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: linux
           - os: macos-latest
             platform: darwin
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install LLVM library (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-18-dev lld-18 patchelf
+          echo "FAZ_LLVM_HOME=/usr/lib/llvm-18" >> "$GITHUB_ENV"
+      - name: Locate LLVM library (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew list llvm@21 >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install llvm@21
+          brew list lld@21 >/dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install lld@21
+          echo "FAZ_LLD_HOME=$(brew --prefix lld@21)" >> "$GITHUB_ENV"
+          echo "FAZ_LLVM_HOME=$(brew --prefix llvm@21)" >> "$GITHUB_ENV"
       - name: Build the initial compiler from LLVM IR
         run: clang -x ir -O2 -Wno-override-module bootstrap/seed-${{ matrix.platform }}.ll -o faz
       - name: Verify self-hosting and native Faz conformance
@@ -24,6 +37,15 @@ jobs:
         run: |
           ./build/faz install "$RUNNER_TEMP/faz-install"
           "$RUNNER_TEMP/faz-install/bin/faz" run examples/hello.fz
+
+      - name: Stage a relocatable distribution and test its installer
+        run: |
+          python3 tools/stage-distribution.py --compiler build/faz --llvm-home "$FAZ_LLVM_HOME" --lld-home "${FAZ_LLD_HOME:-$FAZ_LLVM_HOME}" --output build/faz-distribution
+          FAZ_TEST_ISOLATION=1 python3 tools/test-distribution.py build/faz-distribution
+      - name: Run distribution in a minimal OS without developer packages
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD/build/faz-distribution:/faz:ro" -v "$PWD/tests/fixtures:/fixtures:ro" ubuntu:24.04 /faz/bin/faz run /fixtures/core_values.fz
 
   editor:
     runs-on: ubuntu-latest

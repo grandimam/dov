@@ -27,7 +27,7 @@ fn help():
         "  faz install [prefix]\n",
         "  faz --help\n",
         "  faz --version\n\n",
-        "Builds require LLVM/Clang. Set FAZ_CLANG to its executable path.\n",
+        "Builds use LLVM in-process and a platform linker. Set FAZ_LLVM_LIBRARY/FAZ_LLVM_HOME and FAZ_LINKER.\n",
         "Default build output: build/<source-name>\n",
         "  --legacy-language: explicitly compile pre-0.1 sources (temporary bootstrap compatibility).",
     ], ""))

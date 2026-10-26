@@ -7,6 +7,7 @@ import native_checks
 import bootstrap_checks
 import llvm_checks
 import concurrency_checks
+import backend_checks
 import core_checks
 
 fn main():
@@ -32,6 +33,8 @@ fn main():
     concurrency_checks.run(suite)
     print("Core language v0.1 (default semantics)")
     core_checks.run(suite)
+    print("Direct LLVM backend")
+    backend_checks.run(suite)
     print("Checks:", suite.checks, "Failures:", suite.failed)
     sys.chdir(original)
     fs.remove_temp(working)

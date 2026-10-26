@@ -1,4 +1,4 @@
-# Compiler tools are separate from the runtime linked into user programs.
+# LLVM is loaded only by compiler operations; ordinary executables discard it.
 fn parent(path: str) -> str:
     end = -1
     for index in range(len(path)):
@@ -33,16 +33,161 @@ fn compiler() -> str:
         return explicit
     return "clang"
 
-fn native(source: str, binary: str):
-    executable = compiler()
-    args = ["-x", "ir", "-O2", "-Wno-override-module", source, "-o", binary]
+# Compiler-side code generation uses LLVM in-process. Clang discovery above is
+# only for developer tests of exported IR, never normal build/run or bootstrap.
+fn trimmed(text: str) -> str:
+    end = len(text)
+    while end > 0 and (text[end - 1] == "\n" or text[end - 1] == "\r"):
+        end = end - 1
+    return text[:end]
+
+fn query(executable: str, args: list[str], purpose: str) -> str:
+    result = sys.capture(executable, args, 30000)
+    if result[0] != "0" or trimmed(result[1]) == "":
+        error(purpose + ": " + result[2])
+    return trimmed(result[1])
+
+fn architecture() -> str:
+    name = query("/usr/bin/uname", ["-m"], "cannot determine native architecture")
+    if name == "arm64" or name == "aarch64":
+        return "aarch64"
+    if name == "x86_64":
+        return name
+    error("native LLVM backend supports x86_64 and aarch64; found " + name)
+    return ""
+
+fn target() -> str:
+    arch = architecture()
+    if sys.platform() == "darwin":
+        return arch + "-apple-macosx11.0.0"
+    return arch + "-unknown-linux-gnu"
+
+fn library() -> str:
+    explicit = sys.env("FAZ_LLVM_LIBRARY")
+    if explicit != "":
+        return explicit
+    name = "libLLVM.so"
+    if sys.platform() == "darwin":
+        name = "libLLVM.dylib"
+    home = sys.env("FAZ_LLVM_HOME")
+    if home != "":
+        return home + "/lib/" + name
+    installation = parent(sys.executable())
+    candidates = [installation + "/../lib/faz/llvm/lib/" + name, installation + "/llvm/lib/" + name]
+    for candidate in candidates:
+        if fs.exists(candidate):
+            metadata = parent(parent(candidate)) + "/platform.txt"
+            if fs.exists(metadata) and trimmed(fs.read_text(metadata)) != sys.platform() + "-" + architecture():
+                error("bundled LLVM platform does not match this machine; install the correct Faz archive")
+            return candidate
+    if sys.env("FAZ_LLVM_BUNDLED_ONLY") == "1":
+        error("bundled LLVM library missing; reinstall the complete Faz archive")
+    for prefix in ["/opt/homebrew/opt/llvm", "/usr/local/opt/llvm"]:
+        candidates.append(prefix + "/lib/" + name)
+        for version in ["21", "22", "20", "19", "18"]:
+            candidates.append(prefix + "@" + version + "/lib/" + name)
+    for version in ["21", "22", "20", "19", "18"]:
+        candidates.append("/usr/lib/llvm-" + version + "/lib/" + name)
+    for candidate in candidates:
+        if fs.exists(candidate):
+            return candidate
+    error("LLVM shared library not found; install the complete Faz archive, or for source development set FAZ_LLVM_HOME to LLVM 18–22")
+    return ""
+
+fn bundle() -> str:
+    return parent(sys.executable()) + "/../lib/faz/llvm"
+
+fn linker() -> str:
+    explicit = sys.env("FAZ_LINKER")
+    if explicit != "":
+        return explicit
+    name = "ld.lld"
+    if sys.platform() == "darwin":
+        name = "ld64.lld"
+    bundled = bundle() + "/bin/" + name
+    if fs.exists(bundled):
+        return bundled
+    if sys.env("FAZ_TOOLCHAIN_BUNDLED_ONLY") == "1":
+        error("bundled linker missing; reinstall the complete Faz archive")
+    if sys.platform() == "darwin":
+        return query("/usr/bin/xcrun", ["--find", "ld"], "Apple linker not found; install Command Line Tools or set FAZ_LINKER")
+    return "/usr/bin/ld"
+
+fn sdk() -> str:
+    root = sys.env("FAZ_SDKROOT")
+    if root == "":
+        root = sys.env("SDKROOT")
+    if root == "":
+        root = query("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-path"], "macOS SDK not found; install Command Line Tools or set FAZ_SDKROOT")
+    return root
+
+fn optimization() -> int:
+    level = sys.env("FAZ_OPT_LEVEL")
+    if level == "":
+        return 2
+    if len(level) == 1 and level >= "0" and level <= "3":
+        return str.byte_at(level, 0) - 48
+    error("FAZ_OPT_LEVEL must be 0, 1, 2, or 3")
+    return 2
+
+fn object(source: str, output: str):
+    message = sys._llvm_object(library(), source, output, target(), optimization())
+    if message != "":
+        error(message)
+
+fn link(object: str, binary: str):
+    args: list[str] = []
+    arch = architecture()
+    if sys.platform() == "darwin":
+        if arch == "aarch64":
+            arch = "arm64"
+        inputs = bundle() + "/link"
+        args = ["-arch", arch, "-platform_version", "macos", "11.0", "11.0", "-o", binary, object]
+        if fs.exists(inputs + "/libSystem.tbd"):
+            args.append("-L" + inputs)
+        else:
+            if sys.env("FAZ_TOOLCHAIN_BUNDLED_ONLY") == "1":
+                error("bundled system link inputs missing; reinstall the complete Faz archive")
+            args.append("-syslibroot")
+            args.append(sdk())
+        args.append("-lSystem")
+    else:
+        multiarch = "x86_64-linux-gnu"
+        loader = "/lib64/ld-linux-x86-64.so.2"
+        if arch == "aarch64":
+            multiarch = "aarch64-linux-gnu"
+            loader = "/lib/ld-linux-aarch64.so.1"
+        directory = ""
+        candidates = [bundle() + "/link"]
+        if sys.env("FAZ_TOOLCHAIN_BUNDLED_ONLY") != "1":
+            candidates.append("/usr/lib/" + multiarch)
+            candidates.append("/usr/lib64")
+            candidates.append("/usr/lib")
+        for candidate in candidates:
+            if directory == "" and fs.exists(candidate + "/Scrt1.o") and fs.exists(candidate + "/crti.o") and fs.exists(candidate + "/crtn.o"):
+                directory = candidate
+        if directory == "" or not fs.exists(loader):
+            error("native glibc startup files/loader not found; install libc development files and binutils (supported: x86_64/aarch64 glibc Linux)")
+        args = ["-pie", "--eh-frame-hdr", "-dynamic-linker", loader, "-o", binary, directory + "/Scrt1.o", directory + "/crti.o", object]
+        if directory == bundle() + "/link":
+            args.append(directory + "/libc.so.6")
+            args.append(directory + "/libm.so.6")
+            args.append(directory + "/libdl.so.2")
+        else:
+            args.append("-L" + directory)
+            args.append("-lc")
+            args.append("-lm")
+            args.append("-ldl")
+        args.append(directory + "/crtn.o")
+    executable = linker()
     status = sys.run(executable, args)
-    if status == -1:
-        error("no LLVM compiler found; install Clang, or set FAZ_CLANG to its executable path")
-    if status == -2:
-        error("could not execute LLVM compiler '" + executable + "'")
     if status != 0:
-        error("LLVM compiler '" + executable + "' failed (status " + str(status) + ")")
+        error("native linker '" + executable + "' failed (status " + str(status) + "); install platform linker/SDK files or set FAZ_LINKER")
+
+fn native(source: str, binary: str):
+    output = binary + ".o"
+    object(source, output)
+    link(output, binary)
 
 fn invoke(executable: str, args: list[str]):
     status = sys.run(executable, args)

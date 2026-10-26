@@ -305,6 +305,9 @@ fn builtin(g: Checker, n: syntax.Node) -> str:
     if name == "net.free_port":
         arguments(g, n, args, [])
         return "int"
+    if name == "sys._llvm_object":
+        arguments(g, n, args, ["str", "str", "str", "str", "int"])
+        return "str"
     if name == "sys.capture":
         arguments(g, n, args, ["str", "list[str]", "int"])
         return "list[str]"
@@ -878,6 +881,8 @@ fn core_value(c: CoreChecker, n: syntax.Node) -> int:
             return 1
         return 0
     if kind == "call":
+        if n.text == "sys._llvm_object":
+            fail(n, "private compiler backend is unavailable in core programs")
         if n.text == "copy":
             core_value(c, n.children[0])
             if core_aggregate(core_type(c, n)):

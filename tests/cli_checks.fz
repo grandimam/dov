@@ -25,7 +25,7 @@ fn cli(s: support.Suite):
         support.check(s, result.status == 0 and support.contains(result.out + result.err, "faz"), "CLI " + option, result.out + result.err)
     support.success(s, support.capture_legacy(s.compiler, ["--version"]), "faz 0.1.0\n", "Faz version branding")
     result = support.capture_legacy(s.compiler, ["--help"])
-    support.check(s, support.contains(result.out, "file.fz") and support.contains(result.out, "FAZ_CLANG"), "Faz CLI source and toolchain names", result.out)
+    support.check(s, support.contains(result.out, "file.fz") and support.contains(result.out, "FAZ_LLVM_LIBRARY"), "Faz CLI source and toolchain names", result.out)
     result = support.capture_legacy(s.compiler, [])
     support.check(s, result.status == 0, "CLI default help", result.err)
     for command in ["nonsense", "check", "build", "run", "emit-llvm"]:
@@ -34,11 +34,11 @@ fn cli(s: support.Suite):
     directory = support.fresh()
     main = directory + "/main.fz"
     fs.write_text(main, "fn main():\n    print(\"native\")\n")
-    original_clang = sys.env("FAZ_CLANG")
-    sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
+    original_library = sys.env("FAZ_LLVM_LIBRARY")
+    sys.set_env("FAZ_LLVM_LIBRARY", "/nonexistent/libLLVM")
     result = support.capture_legacy(s.compiler, ["check", main])
     support.check(s, result.status == 0, "check needs no LLVM tool", result.err)
-    sys.set_env("FAZ_CLANG", original_clang)
+    sys.set_env("FAZ_LLVM_LIBRARY", original_library)
     emitted = directory + "/out.ll"
     result = support.capture_legacy(s.compiler, ["emit-llvm", main, "-o", emitted])
     support.check(s, result.status == 0 and support.contains(fs.read_text(emitted), "define i32 @main("), "direct LLVM emission", result.err)
@@ -55,10 +55,10 @@ fn cli(s: support.Suite):
     sys.set_env("PATH", path)
     fs.write_text(main, "fn main():\n    print(str.join(sys.args(), \"|\"))\n")
     support.success(s, support.capture_legacy(s.compiler, ["run", main, "--", "a b", "\"quoted\"", "$HOME;false"]), "a b|\"quoted\"|$HOME;false\n", "literal argument forwarding")
-    sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
+    sys.set_env("FAZ_LLVM_LIBRARY", "/nonexistent/libLLVM")
     result = support.capture_legacy(s.compiler, ["build", main, "-o", directory + "/failed"])
-    support.check(s, result.status != 0 and support.contains(result.err, "LLVM"), "LLVM launch failure", result.err)
-    sys.set_env("FAZ_CLANG", original_clang)
+    support.check(s, result.status != 0 and support.contains(result.err, "LLVM"), "LLVM library load failure", result.err)
+    sys.set_env("FAZ_LLVM_LIBRARY", original_library)
     fs.write_text(main, "fn value() -> int:\n    sys.exit(17)\nfn main():\n    print(value())\n")
     temporary = directory + "/tmp"
     fs.make_parent(temporary + "/unused")
@@ -66,24 +66,11 @@ fn cli(s: support.Suite):
     sys.set_env("TMPDIR", temporary)
     result = support.capture_legacy(s.compiler, ["run", main])
     support.check(s, result.status == 17 and no_faz_temporaries(temporary), "run exit and temp cleanup", result.err)
-    sys.set_env("FAZ_CLANG", "/nonexistent/faz-clang")
+    sys.set_env("FAZ_LLVM_LIBRARY", "/nonexistent/libLLVM")
     result = support.capture_legacy(s.compiler, ["build", main, "-o", directory + "/failed"])
     support.check(s, result.status != 0 and no_faz_temporaries(temporary), "build failure temp cleanup", result.err)
-    sys.set_env("FAZ_CLANG", original_clang)
+    sys.set_env("FAZ_LLVM_LIBRARY", original_library)
     sys.set_env("TMPDIR", tmp)
-    clang = original_clang
-    if clang == "":
-        clang = "clang"
-    resolved = executable(clang)
-    support.check(s, resolved != "", "locate LLVM tool", clang)
-    if resolved != "":
-        spaced = directory + "/native compiler with spaces/clang"
-        fs.make_parent(spaced)
-        fs.symlink(resolved, spaced)
-        sys.set_env("FAZ_CLANG", spaced)
-        fs.write_text(main, "fn main():\n    print(42)\n")
-        support.success(s, support.capture_legacy(s.compiler, ["run", main]), "42\n", "LLVM path with spaces")
-        sys.set_env("FAZ_CLANG", original_clang)
     keep = directory + "/keep.fz"
     fs.write_text(keep, "# keep\n")
     fs.write_text(main, "fn main():\n    print(42)\n")

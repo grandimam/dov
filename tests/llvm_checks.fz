@@ -65,32 +65,9 @@ fn roots(s: support.Suite):
                 support.check(s, allocated > support.stat_value(result.err, "peak") * 30 and support.stat_value(result.err, "collections") > 1000, "bounded peak for cyclic garbage", result.err)
     fs.remove_temp(directory)
 
-fn only_ir(s: support.Suite):
-    directory = support.fresh()
-    wrapper_code = "fn main():\n    args = sys.args()\n    llvm = False\n    module = False\n    for i in range(len(args)):\n        if args[i] == \"-x\" and i + 1 < len(args):\n            llvm = args[i + 1] == \"ir\"\n        if len(args[i]) > 3 and args[i][-3:] == \".ll\":\n            module = True\n        assert not (len(args[i]) > 2 and args[i][-2:] == \".c\")\n        assert not (len(args[i]) > 3 and args[i][-3:] == \".cc\")\n        assert not (len(args[i]) > 4 and args[i][-4:] == \".cpp\")\n    assert llvm and module\n    fs.write_text(sys.env(\"FAZ_LLVM_TEST_LOG\"), \"IR only\\n\")\n    sys.exit(sys.run(sys.env(\"FAZ_LLVM_REAL_COMPILER\"), args))\n"
-    fs.write_text(directory + "/wrapper.fz", wrapper_code)
-    wrapper = directory + "/LLVM tool with spaces"
-    support.build(s, directory + "/wrapper.fz", wrapper)
-    original = sys.env("FAZ_CLANG")
-    original_cc = sys.env("CC")
-    sys.set_env("FAZ_LLVM_REAL_COMPILER", bootstrap_checks.clang())
-    sys.set_env("FAZ_LLVM_TEST_LOG", directory + "/log.txt")
-    sys.set_env("FAZ_CLANG", wrapper)
-    sys.set_env("CC", "/nonexistent/C-compiler")
-    fs.write_text(directory + "/input.fz", "fn main():\n    print(\"LLVM\")\n")
-    result = support.capture_legacy(s.compiler, ["run", directory + "/input.fz"])
-    sys.set_env("FAZ_CLANG", original)
-    sys.set_env("CC", original_cc)
-    support.success(s, result, "LLVM\n", "driver passes only IR to external compiler")
-    support.check(s, fs.exists(directory + "/log.txt"), "LLVM wrapper invoked", result.err)
-    if fs.exists(directory + "/log.txt"):
-        support.check(s, fs.read_text(directory + "/log.txt") == "IR only\n", "LLVM wrapper validates arguments", "")
-    fs.remove_temp(directory)
-
 fn run(s: support.Suite):
     print("LLVM optimization contracts")
     optimized(s)
     roots(s)
-    only_ir(s)
     for expression in ["raw.alloc(8)", "raw.load(0)", "raw.call(\"exit\", 0)"]:
         support.reject(s, "fn main():\n    value = " + expression + "\n", "reserved for the Faz runtime")

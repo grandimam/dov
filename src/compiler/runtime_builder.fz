@@ -52,6 +52,8 @@ fn merge(first: str, second: str, third: str) -> str:
         if starts(line, "@rt_globals = external"):
             keep = False
         if keep:
+            if starts(line, "define i64 @rt_backend_object("):
+                line = "define internal i64 @rt_backend_object(" + line[len("define i64 @rt_backend_object("):]
             result.append(line + "\n")
     return str.join(result, "")
 
@@ -91,7 +93,7 @@ fn embed(directory: str) -> str:
         sources.append(fs.read_text(directory + "/" + name + ".fz") + "\n")
     program = parser.parse(str.join(sources, ""), directory + "/runtime.fz")
     generated = llvm_emitter.emit_library(program)
-    common = fs.read_text(directory + "/runtime/platform/native_common.ll")
+    common = fs.read_text(directory + "/runtime/platform/native_common.ll") + "\n" + fs.read_text(directory + "/runtime/platform/llvm_backend.ll")
     output: list[str] = ["# Generated from the Faz runtime and LLVM OS boundary.\nfn source(platform: str) -> str:\n"]
     for platform in ["darwin", "linux"]:
         boundary = fs.read_text(directory + "/runtime/platform/native_" + platform + ".ll")

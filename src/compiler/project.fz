@@ -85,9 +85,24 @@ fn bootstrap(directory: str, verify: bool, refresh: bool):
 fn install(prefix: str):
     if prefix == "":
         toolchain.error("installation prefix must not be empty")
+    source = sys.executable()
+    payload = toolchain.parent(source) + "/../lib/faz/llvm"
+    if fs.exists(payload + "/platform.txt"):
+        if toolchain.trimmed(fs.read_text(payload + "/platform.txt")) != sys.platform() + "-" + toolchain.architecture():
+            toolchain.error("cannot install a Faz archive for a different platform")
+        for folder in ["lib", "bin", "link", "notices"]:
+            for name in fs.entries(payload + "/" + folder):
+                original = payload + "/" + folder + "/" + name
+                installed = prefix + "/lib/faz/llvm/" + folder + "/" + name
+                if not fs.same_file(original, installed):
+                    fs.make_parent(installed)
+                    if folder != "notices":
+                        fs.copy_executable(original, installed)
+                    else:
+                        fs.write_text(installed, fs.read_text(original))
+        fs.write_text(prefix + "/lib/faz/llvm/platform.txt", fs.read_text(payload + "/platform.txt"))
     destination = prefix + "/bin/faz"
     fs.make_parent(destination)
-    source = sys.executable()
     if not fs.same_file(source, destination):
         fs.copy_executable(source, destination)
     print("Installed " + destination)

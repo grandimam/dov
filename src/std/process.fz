@@ -251,3 +251,8 @@ fn rt_change_directory(path: int, line: int) -> int:
     if raw.call("rt_os_chdir", path) != 0:
         rt_file_error(raw.address("change directory to"), path, line)
     return 0
+
+# Private compiler service: no generic native-call capability is exposed.
+fn rt_backend_object(library: int, source: int, output: int, target: int, optimization: int, line: int) -> int:
+    message = raw.call("rt_os_llvm_object", library, source, output, target, optimization)
+    return rt_copy_string(message, line)

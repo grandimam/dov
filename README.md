@@ -22,7 +22,7 @@
   <a href="#faz-makes-faz">Compiler</a>
 </p>
 
-Faz is an **experimental language for small tools and language experiments**. Write readable `.fz` files, check them before execution, and compile them to native programs with LLVM and Clang. The resulting executable runs without the Faz compiler; platform libraries are still required.
+Faz is an **experimental language for small tools and language experiments**. Write readable `.fz` files, check them before execution, and compile them to native programs with LLVM inside the compiler. The resulting executable runs without the Faz compiler; platform libraries are still required.
 
 ```python
 fn main():
@@ -51,7 +51,17 @@ weekend tool
 
 ## Try it
 
-You need **Git and Clang with LLVM IR support**. On macOS, Apple's command-line tools provide Clang (`xcode-select --install`). On Linux, install Clang through your package manager.
+A staged distribution installs Faz, LLVM, LLD, and native link inputs together: one
+`faz run` or `faz build` command, with no separate LLVM/Clang installation.
+[Distribution staging and remaining platform requirements](docs/native-toolchain.md)
+are documented; versioned binary releases are not published yet. The archive
+uses the operating system’s runtime libraries, with no separate compiler or SDK
+installation for normal user builds. See the tested OS baselines before staging
+a distribution.
+
+**Build from source today.** Developers need Git, Clang for the initial seed,
+and LLVM's shared library (18–22). Set `FAZ_LLVM_HOME` to your LLVM prefix—for
+example `$(brew --prefix llvm@21)` on macOS or `/usr/lib/llvm-18` on Ubuntu.
 
 ```sh
 git clone https://github.com/grandimam/faz.git
@@ -80,7 +90,7 @@ Build the included seed for your platform:
 ./faz emit-llvm hello.fz -o hello.ll   # Inspect the generated LLVM IR.
 ```
 
-Keep Clang installed for `build` and `run`. `check` and `emit-llvm` do not need it. Use `FAZ_CLANG` to select a Clang executable; LLVM is not bundled. This is a separate language—Python packages do not run in Faz.
+`build` and `run` load LLVM in-process and invoke the native linker. `check` and `emit-llvm` need neither. See [native toolchain configuration](docs/native-toolchain.md) for overrides and diagnostics. This is a separate language—Python packages do not run in Faz.
 
 <details>
 <summary><strong>Put Faz on your PATH</strong></summary>
@@ -91,7 +101,7 @@ export PATH="$HOME/.local/bin:$PATH"
 faz --version
 ```
 
-Add the `export` line to your shell configuration to keep it available in future sessions. The installed compiler includes its runtime and does not need this checkout to compile programs.
+Add the `export` line to your shell configuration to keep it available in future sessions. The installed compiler includes its runtime and does not need this checkout. Installing from a staged distribution also copies LLVM; a source-built installation uses your developer LLVM configuration.
 
 </details>
 
@@ -126,7 +136,7 @@ The VS Code extension is installed locally; it is not on the Marketplace and doe
 The compiler is written in Faz's earlier dialect and emits LLVM IR directly. The checked-in seeds let Clang build the first compiler; that compiler rebuilds successive generations from source.
 
 ```text
-.fz source → Faz compiler → LLVM IR → Clang → native executable
+.fz source → Faz + LLVM (in-process) → object → platform linker → executable
 ```
 
 From the repository root:

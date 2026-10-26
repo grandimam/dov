@@ -52,6 +52,8 @@ shutil.copy2(root / 'docs/native-toolchain.md', out / 'TOOLCHAIN.md')
 name = 'libLLVM.dylib' if system == 'darwin' else 'libLLVM.so'
 copied = {}
 licenses = set()
+binary_packages = {}
+source_packages = {}
 
 
 def license_for(source):
@@ -83,6 +85,12 @@ def license_for(source):
         if not owners:
             raise RuntimeError(f'Cannot identify package license for {source}')
         package = owners.split(':')[0]
+        source_name, source_version, binary_version = run(
+            'dpkg-query', '-W', '-f=${source:Package}\t${source:Version}\t${Version}', owners).split('\t')
+        binary_packages[owners] = binary_version
+        if source_name in source_packages and source_packages[source_name] != source_version:
+            raise RuntimeError(f'Conflicting source versions for {source_name}')
+        source_packages[source_name] = source_version
         if package in licenses:
             return
         copyright = Path('/usr/share/doc') / package / 'copyright'
@@ -201,8 +209,10 @@ if system == 'linux':
     'Upstream copyright and license notices accompany each bundled component.\n'
     'No Apple SDK is included. Linux glibc copies are link inputs only; executables use host glibc.\n')
 manifest = {'platform': system + '-' + arch, 'llvm_version': version, 'build_os': platform.platform(), 'lld_version': run(lld_home / 'bin' / linker_name, '--version'),
+            'binary_packages': binary_packages, 'source_packages': source_packages,
             'libraries': {name: str(path) for name, path in sorted(copied.items())},
             'sha256': {str(p.relative_to(out)): hashlib.sha256(p.read_bytes()).hexdigest()
                        for p in sorted(out.rglob('*')) if p.is_file()}}
+(out / 'FILES.sha256').write_text(''.join(digest + '  ' + name + '\n' for name, digest in manifest['sha256'].items()))
 (out / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
 print(out)

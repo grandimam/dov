@@ -1,0 +1,28 @@
+name: Prepare release assets
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build binaries and matching sources in a fresh Ubuntu builder
+        run: |
+          mkdir -p build/release-assets
+          docker run --rm -v "$PWD:/source:ro" -v "$PWD/build/release-assets:/out" ubuntu:24.04 sh /source/tools/build-linux-release.sh
+      - name: Verify archive in a clean runtime-only Ubuntu container
+        run: |
+          cd build/release-assets
+          sha256sum -c SHA256SUMS-linux
+          tar -xzf faz-v0.1.0-linux-x86_64.tar.gz
+          docker run --rm -v "$PWD/faz-v0.1.0-linux-x86_64:/faz:ro" -v "$GITHUB_WORKSPACE/tests/fixtures:/fixtures:ro" ubuntu:24.04 /faz/bin/faz run /fixtures/core_values.fz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: faz-v0.1.0-linux-x86_64-release-assets
+          retention-days: 30
+          compression-level: 0
+          path: |
+            build/release-assets/*.tar.gz
+            build/release-assets/SHA256SUMS-linux

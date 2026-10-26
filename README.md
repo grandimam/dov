@@ -178,6 +178,39 @@ language—not something to infer from this tiny example.
 
 <sub>The VS Code extension installs locally; it is not on the Marketplace and has no language server yet. Older examples that need <code>--legacy-language</code> are marked in the example guide.</sub>
 
+## Benchmarks: Faz, Rust, and Go
+
+**Measured native code, not estimates.** Matching algorithms and signed 64-bit
+integers, with every output checked against an independent Python reference.
+Lower times are better.
+
+| Workload | Faz | Rust | Go |
+| :--- | ---: | ---: | ---: |
+| Modular Fibonacci · 20 million steps | 78.47 ms | 66.41 ms | 67.18 ms |
+| Prime sieve · through 3 million | 112.68 ms | 17.27 ms | 22.70 ms |
+| Collection allocation · 100,000 × 128 integers | 431.52 ms | 34.79 ms | 45.50 ms |
+
+Apple M2 Pro · macOS 26.5.2 · Faz 0.1.0 · Rust 1.92.0 · Go 1.22.3.
+Median of nine measured runs after two warmups, with randomized language order.
+Times include process startup and checksum output; compilation is excluded.
+Faz uses `FAZ_OPT_LEVEL=3`, Rust uses `-C opt-level=3`, and Go uses its default
+optimized build.
+
+**The takeaway:** Faz was within about 18% of Rust and Go on this scalar workload,
+but took roughly 5–12× as long on these collection-heavy workloads. These are
+three local microbenchmarks—not a general language ranking or a claim about
+parallelism, networking, memory use, or the latest compiler releases.
+
+Reproduce from the repository root with Faz, Rust, Go, and Python 3 installed:
+
+```sh
+python3 examples/benchmarks/run.py --runs 9
+```
+
+**[Methodology and source →](examples/benchmarks/README.md)** ·
+[Full results and executable sizes](examples/benchmarks/RESULTS.md) ·
+[Raw measurements](examples/benchmarks/results.json)
+
 ## Faz makes Faz
 
 **The compiler is written in Faz.** It uses the language's earlier dialect and
